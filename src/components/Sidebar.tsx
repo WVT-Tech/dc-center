@@ -76,10 +76,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Brand Header */}
       <div className="h-16 px-5 flex items-center justify-between border-b border-slate-200 dark:border-slate-800 shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-slate-900 dark:bg-blue-600 text-white flex items-center justify-center font-mono text-xs font-semibold shrink-0">
-            DC
-          </div>
-          <span className="font-semibold text-[15px] tracking-tight text-slate-900 dark:text-slate-100 truncate">
+          <img
+            src="/assets/aistudio/Jasmin_2882c892.png"
+            alt="Jasmin Tech Logo"
+            className="w-9 h-9 rounded-lg object-contain bg-white border border-slate-200 dark:border-slate-700 p-0.5 shrink-0"
+          />
+          <span className="font-semibold text-[15px] tracking-tight text-slate-900 dark:text-white truncate">
             {t(lang, 'brandName')}
           </span>
         </div>

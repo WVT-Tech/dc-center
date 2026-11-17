@@ -4,6 +4,7 @@ import {
   DarStage,
   DocumentActionRequest,
   Language,
+  RoleDefinition,
   UserProfile,
 } from '../types/dcc';
 import { t } from '../i18n/translations';
@@ -13,6 +14,7 @@ interface DarWorkflowViewProps {
   lang: Language;
   dars: DocumentActionRequest[];
   currentUser: UserProfile;
+  roles: RoleDefinition[];
   onAdvanceDar: (darId: string, comment: string) => void;
   onRejectDar: (darId: string, comment: string) => void;
   onCreateNewDar: () => void;
@@ -32,6 +34,7 @@ export const DarWorkflowView: React.FC<DarWorkflowViewProps> = ({
   lang,
   dars,
   currentUser,
+  roles,
   onAdvanceDar,
   onRejectDar,
   onCreateNewDar,
@@ -40,15 +43,37 @@ export const DarWorkflowView: React.FC<DarWorkflowViewProps> = ({
   const [filter, setFilter] = useState<DarFilter>('all');
   const [comments, setComments] = useState<Record<string, string>>({});
 
+  const userRoleDef = useMemo(
+    () =>
+      roles.find(
+        (r) =>
+          (currentUser.roleId && r.id === currentUser.roleId) ||
+          (r.name === currentUser.role &&
+            (r.department === currentUser.department || r.department === 'ALL'))
+      ),
+    [roles, currentUser]
+  );
+
   const canActOnStage = (stage: DarStage): boolean => {
+    const perm = userRoleDef?.darPermission;
     if (stage === 'Pending Reviewer') {
-      return currentUser.role === 'Dept Reviewer' || currentUser.role === 'Document Controller';
+      return (
+        Boolean(currentUser.isAdmin) ||
+        perm === 'review' ||
+        perm === 'publish' ||
+        currentUser.role === 'Dept Reviewer' ||
+        currentUser.role === 'Document Controller'
+      );
     }
     if (stage === 'Pending QMR') {
-      return currentUser.role === 'QMR / Approver';
+      return perm === 'qmr' || currentUser.role === 'QMR / Approver';
     }
     if (stage === 'Pending DCC Publish') {
-      return currentUser.role === 'Document Controller';
+      return (
+        Boolean(currentUser.isAdmin) ||
+        perm === 'publish' ||
+        currentUser.role === 'Document Controller'
+      );
     }
     return false;
   };
@@ -67,7 +92,7 @@ export const DarWorkflowView: React.FC<DarWorkflowViewProps> = ({
       if (filter === 'rejected') return dar.stage === 'Rejected';
       return true;
     });
-  }, [dars, filter, currentUser.role]);
+  }, [dars, filter, currentUser, userRoleDef]);
 
   const getStageIndex = (stage: DarStage): number => {
     if (stage === 'Pending Reviewer') return 0;

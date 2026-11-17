@@ -3,29 +3,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FilePlus2, Menu } from 'lucide-react';
 import {
   AuditActionType,
   AuditEvent,
   ControlledDocument,
   DarType,
+  DbConnectionInfo,
   DepartmentInfo,
   DepartmentKpiFishbone,
   DocumentActionRequest,
   KpiTargets,
   Language,
   NavSection,
+  RoleDefinition,
   UserProfile,
 } from './types/dcc';
-import {
-  SEED_AUDIT_EVENTS,
-  SEED_DARS,
-  SEED_DEPARTMENTS,
-  SEED_DOCUMENTS,
-  SEED_FISHBONES,
-  SEED_USERS,
-} from './data/seedData';
 import { t } from './i18n/translations';
 import { DEFAULT_KPI_TARGETS } from './utils/kpiMetrics';
 import { LoginScreen } from './components/LoginScreen';
@@ -50,11 +44,60 @@ interface PersistedState {
   auditEvents: AuditEvent[];
   fishbones: DepartmentKpiFishbone[];
   users: UserProfile[];
+  roles?: RoleDefinition[];
   kpiTargets?: KpiTargets;
   authenticatedUserId: string | null;
   lang: Language;
   darkMode: boolean;
 }
+
+const DEFAULT_ADMIN_USER: UserProfile = {
+  id: 'usr-dcc',
+  username: 'dcc',
+  password: 'dcl0gin',
+  isAdmin: true,
+  roleId: 'role-dcc-admin',
+  nameTh: 'Admin DCC',
+  nameEn: 'Admin DCC',
+  role: 'Document Controller',
+  department: 'QA',
+  titleTh: 'ผู้ดูแลระบบและควบคุมเอกสารกลาง (Admin / DCC)',
+  titleEn: 'System Admin & Lead Document Controller',
+  email: 'dcc.admin@enterprise-dcc.co.th',
+  avatarUrl: '/src/assets/images/avatar_doc_controller_1794897226157.jpg',
+};
+
+const DEFAULT_DEPARTMENTS: DepartmentInfo[] = [
+  { code: 'QA', nameTh: 'ประกันคุณภาพ', nameEn: 'Quality Assurance', headName: 'Admin DCC' },
+  { code: 'PD', nameTh: 'ฝ่ายผลิต', nameEn: 'Production', headName: 'หัวหน้าฝ่ายผลิต' },
+  { code: 'EN', nameTh: 'วิศวกรรมและซ่อมบำรุง', nameEn: 'Engineering & Maintenance', headName: 'หัวหน้าฝ่ายวิศวกรรม' },
+  { code: 'WH', nameTh: 'คลังสินค้าและจัดส่ง', nameEn: 'Warehouse & Logistics', headName: 'หัวหน้าฝ่ายคลังสินค้า' },
+  { code: 'HR', nameTh: 'ทรัพยากรบุคคล', nameEn: 'Human Resources', headName: 'หัวหน้าฝ่ายบุคคล' },
+  { code: 'IT', nameTh: 'เทคโนโลยีสารสนเทศ', nameEn: 'Information Technology', headName: 'หัวหน้าฝ่ายไอที' },
+  { code: 'PU', nameTh: 'จัดซื้อ', nameEn: 'Purchasing', headName: 'หัวหน้าฝ่ายจัดซื้อ' },
+];
+
+const DEFAULT_ROLES: RoleDefinition[] = [
+  {
+    id: 'role-dcc-admin',
+    name: 'Document Controller',
+    department: 'ALL',
+    darPermission: 'publish',
+    isSystem: true,
+  },
+  {
+    id: 'role-qmr-all',
+    name: 'QMR / Approver',
+    department: 'ALL',
+    darPermission: 'qmr',
+  },
+  ...DEFAULT_DEPARTMENTS.map((d) => ({
+    id: `role-${d.code.toLowerCase()}-reviewer`,
+    name: `ผู้รับผิดชอบ KPI แผนก ${d.code}`,
+    department: d.code,
+    darPermission: 'review' as const,
+  })),
+];
 
 function getInitialState(): PersistedState {
   try {
@@ -65,10 +108,11 @@ function getInitialState(): PersistedState {
         return {
           documents: parsed.documents,
           dars: parsed.dars,
-          departments: parsed.departments,
+          departments: parsed.departments.length > 0 ? parsed.departments : DEFAULT_DEPARTMENTS,
           auditEvents: parsed.auditEvents,
-          fishbones: parsed.fishbones ?? SEED_FISHBONES,
-          users: parsed.users ?? SEED_USERS,
+          fishbones: parsed.fishbones ?? [],
+          users: parsed.users && parsed.users.length > 0 ? parsed.users : [DEFAULT_ADMIN_USER],
+          roles: parsed.roles && parsed.roles.length > 0 ? parsed.roles : DEFAULT_ROLES,
           kpiTargets: parsed.kpiTargets ?? DEFAULT_KPI_TARGETS,
           authenticatedUserId:
             parsed.authenticatedUserId !== undefined ? parsed.authenticatedUserId : null,
@@ -78,15 +122,16 @@ function getInitialState(): PersistedState {
       }
     }
   } catch {
-    // Fallback to seed state if storage is unavailable or corrupted
+    // Fallback to clean initial state if storage is unavailable or corrupted
   }
   return {
-    documents: SEED_DOCUMENTS,
-    dars: SEED_DARS,
-    departments: SEED_DEPARTMENTS,
-    auditEvents: SEED_AUDIT_EVENTS,
-    fishbones: SEED_FISHBONES,
-    users: SEED_USERS,
+    documents: [],
+    dars: [],
+    departments: DEFAULT_DEPARTMENTS,
+    auditEvents: [],
+    fishbones: [],
+    users: [DEFAULT_ADMIN_USER],
+    roles: DEFAULT_ROLES,
     kpiTargets: DEFAULT_KPI_TARGETS,
     authenticatedUserId: null,
     lang: 'th',
@@ -119,6 +164,7 @@ export default function App() {
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(initial.auditEvents);
   const [fishbones, setFishbones] = useState<DepartmentKpiFishbone[]>(initial.fishbones);
   const [users, setUsers] = useState<UserProfile[]>(initial.users);
+  const [roles, setRoles] = useState<RoleDefinition[]>(initial.roles ?? DEFAULT_ROLES);
   const [kpiTargets, setKpiTargets] = useState<KpiTargets>(
     initial.kpiTargets ?? DEFAULT_KPI_TARGETS
   );
@@ -138,6 +184,10 @@ export default function App() {
     targetDoc?: ControlledDocument;
   }>({ isOpen: false, darType: 'New Issue' });
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [dbInfo, setDbInfo] = useState<DbConnectionInfo | null>(null);
+  const [dbBusy, setDbBusy] = useState(false);
+  const dbHydratedRef = useRef(false);
+  const skipNextSyncRef = useRef(false);
 
   const currentUser: UserProfile = useMemo(
     () => users.find((u) => u.id === authenticatedUserId) ?? users[0],
@@ -148,6 +198,80 @@ export default function App() {
     document.documentElement.classList.toggle('dark', darkMode);
   }, [darkMode]);
 
+  // Initial load from Cloudflare D1 / SQLite backend
+  useEffect(() => {
+    let cancelled = false;
+    async function hydrateFromD1() {
+      try {
+        const res = await fetch('/api/dcc/state');
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          ok: boolean;
+          empty: boolean;
+          state: {
+            documents: ControlledDocument[];
+            dars: DocumentActionRequest[];
+            departments: DepartmentInfo[];
+            auditEvents: AuditEvent[];
+            fishbones: DepartmentKpiFishbone[];
+            users: UserProfile[];
+            roles?: RoleDefinition[];
+            kpiTargets: KpiTargets;
+          } | null;
+          dbInfo?: DbConnectionInfo;
+        };
+        if (cancelled) return;
+        if (data.dbInfo) setDbInfo(data.dbInfo);
+
+        if (!data.empty && data.state) {
+          skipNextSyncRef.current = true;
+          setDocuments(data.state.documents);
+          setDars(data.state.dars);
+          setDepartments(data.state.departments);
+          setAuditEvents(data.state.auditEvents);
+          setFishbones(data.state.fishbones);
+          setUsers(data.state.users);
+          if (data.state.roles && data.state.roles.length > 0) {
+            setRoles(data.state.roles);
+          }
+          setKpiTargets(data.state.kpiTargets);
+        } else {
+          // Database is empty: seed it immediately with current initial state
+          const syncRes = await fetch('/api/dcc/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              state: {
+                documents,
+                dars,
+                departments,
+                auditEvents,
+                fishbones,
+                users,
+                roles,
+                kpiTargets,
+              },
+              replaceAll: false,
+            }),
+          });
+          if (syncRes.ok) {
+            const syncJson = (await syncRes.json()) as { dbInfo?: DbConnectionInfo };
+            if (!cancelled && syncJson.dbInfo) setDbInfo(syncJson.dbInfo);
+          }
+        }
+      } catch {
+        // Keep localStorage cache working if server is momentarily unavailable
+      } finally {
+        if (!cancelled) dbHydratedRef.current = true;
+      }
+    }
+    hydrateFromD1();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist locally + sync mutations to Cloudflare D1 / SQLite backend
   useEffect(() => {
     try {
       const payload: PersistedState = {
@@ -157,6 +281,7 @@ export default function App() {
         auditEvents,
         fishbones,
         users,
+        roles,
         kpiTargets,
         authenticatedUserId,
         lang,
@@ -166,6 +291,41 @@ export default function App() {
     } catch {
       // Ignore storage quota overflow gracefully
     }
+
+    if (!dbHydratedRef.current) return;
+    if (skipNextSyncRef.current) {
+      skipNextSyncRef.current = false;
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch('/api/dcc/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            state: {
+              documents,
+              dars,
+              departments,
+              auditEvents,
+              fishbones,
+              users,
+              roles,
+              kpiTargets,
+            },
+          }),
+        });
+        if (res.ok) {
+          const json = (await res.json()) as { dbInfo?: DbConnectionInfo };
+          if (json.dbInfo) setDbInfo(json.dbInfo);
+        }
+      } catch {
+        // Silent retry on next mutation or manual sync
+      }
+    }, 350);
+
+    return () => window.clearTimeout(timer);
   }, [
     documents,
     dars,
@@ -173,6 +333,7 @@ export default function App() {
     auditEvents,
     fishbones,
     users,
+    roles,
     kpiTargets,
     authenticatedUserId,
     lang,
@@ -596,6 +757,84 @@ export default function App() {
     );
   };
 
+  const handleAddRole = (role: RoleDefinition) => {
+    setRoles((prev) => [...prev, role]);
+    appendAudit(
+      'ROLE_ADDED',
+      role.department,
+      `เพิ่ม Role ใหม่ "${role.name}" สำหรับแผนก ${role.department}`,
+      `Created Role "${role.name}" for department ${role.department}`
+    );
+    showToast(
+      lang === 'th'
+        ? `เพิ่ม Role "${role.name}" (${role.department}) เรียบร้อยแล้ว`
+        : `Created role "${role.name}"`
+    );
+  };
+
+  const handleUpdateRole = (updatedRole: RoleDefinition) => {
+    setRoles((prev) => prev.map((r) => (r.id === updatedRole.id ? updatedRole : r)));
+    // Keep assigned users aligned with updated Role name and Department
+    setUsers((prev) =>
+      prev.map((u) => {
+        if (u.roleId === updatedRole.id) {
+          const nextDept =
+            updatedRole.department !== 'ALL' ? updatedRole.department : u.department;
+          return {
+            ...u,
+            role: updatedRole.name,
+            department: nextDept,
+            titleTh: `${updatedRole.name} (${nextDept})`,
+            titleEn: `${updatedRole.name} (${nextDept})`,
+          };
+        }
+        return u;
+      })
+    );
+    appendAudit(
+      'ROLE_UPDATED',
+      updatedRole.department,
+      `แก้ไข Role "${updatedRole.name}" (แผนก ${updatedRole.department})`,
+      `Updated Role "${updatedRole.name}" (${updatedRole.department})`
+    );
+    showToast(
+      lang === 'th'
+        ? `อัปเดต Role "${updatedRole.name}" เรียบร้อยแล้ว`
+        : `Updated role "${updatedRole.name}"`
+    );
+  };
+
+  const handleDeleteRole = (roleId: string) => {
+    const target = roles.find((r) => r.id === roleId);
+    if (!target || target.isSystem) return;
+    const inUse = users.some(
+      (u) =>
+        u.roleId === roleId ||
+        (u.role === target.name &&
+          (target.department === 'ALL' || u.department === target.department))
+    );
+    if (inUse) {
+      showToast(
+        lang === 'th'
+          ? `ไม่สามารถลบ Role "${target.name}" ได้ เนื่องจากยังมีผู้ใช้งาน Role นี้อยู่`
+          : `Cannot delete role "${target.name}" while assigned to users`
+      );
+      return;
+    }
+    setRoles((prev) => prev.filter((r) => r.id !== roleId));
+    appendAudit(
+      'ROLE_DELETED',
+      target.department,
+      `ลบ Role "${target.name}" (แผนก ${target.department})`,
+      `Deleted Role "${target.name}" (${target.department})`
+    );
+    showToast(
+      lang === 'th'
+        ? `ลบ Role "${target.name}" เรียบร้อยแล้ว`
+        : `Deleted role "${target.name}"`
+    );
+  };
+
   const handleAddUser = (user: UserProfile) => {
     setUsers((prev) => [...prev, user]);
     appendAudit(
@@ -608,6 +847,43 @@ export default function App() {
       lang === 'th'
         ? `สร้างบัญชีผู้ใช้ @${user.username} เรียบร้อยแล้ว`
         : `Created account @${user.username}`
+    );
+  };
+
+  const handleUpdateUser = (updatedUser: UserProfile) => {
+    setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    appendAudit(
+      'USER_UPDATED',
+      updatedUser.username,
+      `แก้ไขบัญชีผู้ใช้ @${updatedUser.username} (${updatedUser.department} · ${updatedUser.role})`,
+      `Updated user account @${updatedUser.username} (${updatedUser.department} · ${updatedUser.role})`
+    );
+    showToast(
+      lang === 'th'
+        ? `บันทึกการแก้ไขบัญชี @${updatedUser.username} แล้ว`
+        : `Updated account @${updatedUser.username}`
+    );
+  };
+
+  const handleDeleteUser = (userId: string) => {
+    const target = users.find((u) => u.id === userId);
+    if (!target || target.id === 'usr-dcc' || target.username.toLowerCase() === 'dcc') {
+      return;
+    }
+    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    if (authenticatedUserId === userId) {
+      setAuthenticatedUserId('usr-dcc');
+    }
+    appendAudit(
+      'USER_DELETED',
+      target.username,
+      `ลบบัญชีผู้ใช้ @${target.username} (${target.department} · ${target.role})`,
+      `Deleted user account @${target.username} (${target.department} · ${target.role})`
+    );
+    showToast(
+      lang === 'th'
+        ? `ลบบัญชีผู้ใช้ @${target.username} เรียบร้อยแล้ว`
+        : `Deleted account @${target.username}`
     );
   };
 
@@ -636,18 +912,135 @@ export default function App() {
     setAuthenticatedUserId(null);
   };
 
-  const handleResetDemoData = () => {
-    setDocuments(SEED_DOCUMENTS);
-    setDars(SEED_DARS);
-    setDepartments(SEED_DEPARTMENTS);
-    setAuditEvents(SEED_AUDIT_EVENTS);
-    setFishbones(SEED_FISHBONES);
-    setUsers(SEED_USERS);
+  const handleResetDemoData = async () => {
+    skipNextSyncRef.current = true;
+    setDocuments([]);
+    setDars([]);
+    setDepartments(DEFAULT_DEPARTMENTS);
+    setAuditEvents([]);
+    setFishbones([]);
+    setUsers([DEFAULT_ADMIN_USER]);
+    setRoles(DEFAULT_ROLES);
     setKpiTargets(DEFAULT_KPI_TARGETS);
     localStorage.removeItem(STORAGE_KEY);
+    setDbBusy(true);
+    try {
+      const res = await fetch('/api/dcc/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          state: {
+            documents: [],
+            dars: [],
+            departments: DEFAULT_DEPARTMENTS,
+            auditEvents: [],
+            fishbones: [],
+            users: [DEFAULT_ADMIN_USER],
+            roles: DEFAULT_ROLES,
+            kpiTargets: DEFAULT_KPI_TARGETS,
+          },
+          replaceAll: true,
+        }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as { dbInfo?: DbConnectionInfo };
+        if (json.dbInfo) setDbInfo(json.dbInfo);
+      }
+    } finally {
+      setDbBusy(false);
+    }
     showToast(
-      lang === 'th' ? 'รีเซ็ตข้อมูลเริ่มต้นทั้งหมดเรียบร้อยแล้ว' : 'Demo data restored'
+      lang === 'th' ? 'ล้างข้อมูลและรีเซ็ตกลับสู่ค่าเริ่มต้นเรียบร้อยแล้ว' : 'Workspace reset to defaults'
     );
+  };
+
+  const handleSyncDatabase = async () => {
+    setDbBusy(true);
+    try {
+      const res = await fetch('/api/d1/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          state: {
+            documents,
+            dars,
+            departments,
+            auditEvents,
+            fishbones,
+            users,
+            roles,
+            kpiTargets,
+          },
+        }),
+      });
+      const json = (await res.json()) as { ok: boolean; dbInfo?: DbConnectionInfo; error?: string };
+      if (json.dbInfo) setDbInfo(json.dbInfo);
+      if (!res.ok || !json.ok) {
+        showToast(json.error || (lang === 'th' ? 'ไม่สามารถซิงค์ฐานข้อมูล D1 ได้' : 'D1 sync failed'));
+        return;
+      }
+      showToast(
+        lang === 'th'
+          ? 'สร้างตารางและซิงค์ข้อมูลเข้าสู่ฐานข้อมูล D1 เรียบร้อยแล้ว'
+          : 'Initialized schema & synced data to D1'
+      );
+    } catch {
+      showToast(lang === 'th' ? 'เกิดข้อผิดพลาดในการเชื่อมต่อ D1' : 'D1 connection error');
+    } finally {
+      setDbBusy(false);
+    }
+  };
+
+  const handlePullDatabase = async () => {
+    setDbBusy(true);
+    try {
+      const res = await fetch('/api/dcc/state');
+      const json = (await res.json()) as {
+        ok: boolean;
+        empty: boolean;
+        state: {
+          documents: ControlledDocument[];
+          dars: DocumentActionRequest[];
+          departments: DepartmentInfo[];
+          auditEvents: AuditEvent[];
+          fishbones: DepartmentKpiFishbone[];
+          users: UserProfile[];
+          roles?: RoleDefinition[];
+          kpiTargets: KpiTargets;
+        } | null;
+        dbInfo?: DbConnectionInfo;
+        error?: string;
+      };
+      if (json.dbInfo) setDbInfo(json.dbInfo);
+      if (!res.ok || !json.ok) {
+        showToast(json.error || (lang === 'th' ? 'โหลดข้อมูลจาก D1 ไม่สำเร็จ' : 'Failed to pull from D1'));
+        return;
+      }
+      if (!json.empty && json.state) {
+        skipNextSyncRef.current = true;
+        setDocuments(json.state.documents);
+        setDars(json.state.dars);
+        setDepartments(json.state.departments);
+        setAuditEvents(json.state.auditEvents);
+        setFishbones(json.state.fishbones);
+        setUsers(json.state.users);
+        if (json.state.roles && json.state.roles.length > 0) {
+          setRoles(json.state.roles);
+        }
+        setKpiTargets(json.state.kpiTargets);
+        showToast(
+          lang === 'th' ? 'โหลดข้อมูลล่าสุดจากฐานข้อมูล D1 แล้ว' : 'Pulled latest state from D1'
+        );
+      } else {
+        showToast(
+          lang === 'th' ? 'ฐานข้อมูล D1 ยังว่างอยู่ กรุณากดซิงค์ข้อมูลก่อน' : 'D1 database is empty'
+        );
+      }
+    } catch {
+      showToast(lang === 'th' ? 'เกิดข้อผิดพลาดในการโหลดข้อมูลจาก D1' : 'D1 pull error');
+    } finally {
+      setDbBusy(false);
+    }
   };
 
   const selectedDoc = useMemo(
@@ -757,6 +1150,7 @@ export default function App() {
               dars={dars}
               departments={departments}
               fishbones={fishbones}
+              roles={roles}
               todayStr={TODAY_STR}
               targets={kpiTargets}
               currentUser={currentUser}
@@ -789,6 +1183,7 @@ export default function App() {
               lang={lang}
               dars={dars}
               currentUser={currentUser}
+              roles={roles}
               onAdvanceDar={handleAdvanceDar}
               onRejectDar={handleRejectDar}
               onCreateNewDar={() =>
@@ -817,12 +1212,22 @@ export default function App() {
             <SettingsView
               lang={lang}
               departments={departments}
+              roles={roles}
               users={users}
               currentUser={currentUser}
+              dbInfo={dbInfo}
+              dbBusy={dbBusy}
               onAddDepartment={handleAddDepartment}
+              onAddRole={handleAddRole}
+              onUpdateRole={handleUpdateRole}
+              onDeleteRole={handleDeleteRole}
               onAddUser={handleAddUser}
+              onUpdateUser={handleUpdateUser}
+              onDeleteUser={handleDeleteUser}
               onSwitchUser={setAuthenticatedUserId}
               onResetDemoData={handleResetDemoData}
+              onSyncDatabase={handleSyncDatabase}
+              onPullDatabase={handlePullDatabase}
             />
           )}
         </main>

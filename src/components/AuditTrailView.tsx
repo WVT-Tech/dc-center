@@ -22,6 +22,11 @@ const ACTION_OPTIONS: ('ALL' | AuditActionType)[] = [
   'USER_LOGIN',
   'USER_LOGOUT',
   'USER_ADDED',
+  'USER_UPDATED',
+  'USER_DELETED',
+  'ROLE_ADDED',
+  'ROLE_UPDATED',
+  'ROLE_DELETED',
 ];
 
 export const AuditTrailView: React.FC<AuditTrailViewProps> = ({ lang, events }) => {

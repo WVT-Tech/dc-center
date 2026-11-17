@@ -13,17 +13,24 @@ export type DarStage =
   | 'Published'
   | 'Rejected';
 
-export type UserRole =
-  | 'Document Controller'
-  | 'QMR / Approver'
-  | 'Dept Reviewer'
-  | 'Reader';
+export type UserRole = string;
+
+export type DarPermission = 'none' | 'review' | 'qmr' | 'publish';
+
+export interface RoleDefinition {
+  id: string;
+  name: string;
+  department: string; // 'ALL' for cross-department Admin/QMR, or department code e.g. 'QA'
+  darPermission: DarPermission;
+  isSystem?: boolean;
+}
 
 export interface UserProfile {
   id: string;
   username: string;
   password: string;
   isAdmin?: boolean;
+  roleId?: string;
   nameTh: string;
   nameEn: string;
   role: UserRole;
@@ -179,6 +186,11 @@ export type AuditActionType =
   | 'USER_LOGIN'
   | 'USER_LOGOUT'
   | 'USER_ADDED'
+  | 'USER_UPDATED'
+  | 'USER_DELETED'
+  | 'ROLE_ADDED'
+  | 'ROLE_UPDATED'
+  | 'ROLE_DELETED'
   | 'KPI_FISHBONE_UPDATED';
 
 export interface AuditEvent {
@@ -207,3 +219,22 @@ export type NavSection =
   | 'archive'
   | 'audit-trail'
   | 'settings';
+
+export interface DbConnectionInfo {
+  driver: 'cloudflare-d1' | 'local-sqlite';
+  connected: boolean;
+  databaseName: string;
+  databaseIdMasked: string | null;
+  lastSyncedAt: string | null;
+  lastError: string | null;
+  counts: {
+    departments: number;
+    roles: number;
+    users: number;
+    documents: number;
+    dars: number;
+    fishbones: number;
+    auditEvents: number;
+  };
+}
+

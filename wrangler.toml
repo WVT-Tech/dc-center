@@ -1,0 +1,12 @@
+# Cloudflare D1 Database Binding Configuration
+# Use this file when deploying with Wrangler CLI or executing D1 migrations:
+#   npx wrangler d1 execute dcc-sqlite-db --file=./d1/schema.sql
+
+name = "document-control-center"
+compatibility_date = "2025-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dcc-sqlite-db"
+database_id = "YOUR_CLOUDFLARE_D1_DATABASE_ID"
+migrations_dir = "d1"

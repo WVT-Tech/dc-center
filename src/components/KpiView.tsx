@@ -23,6 +23,7 @@ import {
   KpiTargets,
   Language,
   NavSection,
+  RoleDefinition,
   UserProfile,
 } from '../types/dcc';
 import { t } from '../i18n/translations';
@@ -40,6 +41,7 @@ interface KpiViewProps {
   dars: DocumentActionRequest[];
   departments: DepartmentInfo[];
   fishbones: DepartmentKpiFishbone[];
+  roles: RoleDefinition[];
   todayStr: string;
   targets: KpiTargets;
   currentUser: UserProfile;
@@ -64,6 +66,7 @@ export const KpiView: React.FC<KpiViewProps> = ({
   dars,
   departments,
   fishbones,
+  roles,
   todayStr,
   targets,
   currentUser,
@@ -72,10 +75,47 @@ export const KpiView: React.FC<KpiViewProps> = ({
   onNavigate,
   onOpenDocumentByNumber,
 }) => {
+  const userRoleDef = useMemo(
+    () =>
+      roles.find(
+        (r) =>
+          (currentUser.roleId && r.id === currentUser.roleId) ||
+          (r.name === currentUser.role &&
+            (r.department === currentUser.department || r.department === 'ALL'))
+      ),
+    [roles, currentUser]
+  );
+
+  const hasAllDeptKpiAccess =
+    Boolean(currentUser.isAdmin) ||
+    currentUser.username.toLowerCase() === 'dcc' ||
+    userRoleDef?.department === 'ALL';
+
+  const effectiveDept =
+    userRoleDef && userRoleDef.department !== 'ALL'
+      ? userRoleDef.department
+      : currentUser.department;
+
+  const visibleDepartments = useMemo(
+    () =>
+      hasAllDeptKpiAccess
+        ? departments
+        : departments.filter((d) => d.code === effectiveDept),
+    [departments, hasAllDeptKpiAccess, effectiveDept]
+  );
+
   const [activeTab, setActiveTab] = useState<'fishbone' | 'summary'>('fishbone');
   const [selectedDept, setSelectedDept] = useState<string>(
-    currentUser.isAdmin ? departments[0]?.code ?? 'QA' : currentUser.department
+    hasAllDeptKpiAccess ? departments[0]?.code ?? effectiveDept : effectiveDept
   );
+
+  useEffect(() => {
+    if (!hasAllDeptKpiAccess) {
+      setSelectedDept(effectiveDept);
+    } else if (!departments.some((d) => d.code === selectedDept) && departments[0]) {
+      setSelectedDept(departments[0].code);
+    }
+  }, [hasAllDeptKpiAccess, effectiveDept, departments, selectedDept]);
 
   // Modals for Fishbone Head & Sub-Factor Entry
   const [headModalOpen, setHeadModalOpen] = useState(false);
@@ -107,12 +147,8 @@ export const KpiView: React.FC<KpiViewProps> = ({
     [deptSheets, selectedSheetId]
   );
 
-  // Permissions: Admin ('dcc') or QMR can edit any dept; Dept Reviewer/staff can edit their own dept
-  const canEditDept =
-    Boolean(currentUser.isAdmin) ||
-    currentUser.role === 'Document Controller' ||
-    currentUser.role === 'QMR / Approver' ||
-    currentUser.department === selectedDept;
+  // Permissions: Admin ('dcc') / global role can edit any dept; department-scoped roles can edit their own dept
+  const canEditDept = hasAllDeptKpiAccess || effectiveDept === selectedDept;
 
   // Head form state
   const [headPeriod, setHeadPeriod] = useState('Q4 / 2026');
@@ -315,14 +351,35 @@ export const KpiView: React.FC<KpiViewProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  // Summary metrics for ISO Summary tab
-  const summary = computeDccKpis(documents, dars, departments, todayStr, targets);
+  // Summary metrics for ISO Summary tab (scoped to user's department unless global role)
+  const scopedDocuments = useMemo(
+    () =>
+      hasAllDeptKpiAccess
+        ? documents
+        : documents.filter((d) => d.department === effectiveDept),
+    [documents, hasAllDeptKpiAccess, effectiveDept]
+  );
+  const scopedDars = useMemo(
+    () =>
+      hasAllDeptKpiAccess
+        ? dars
+        : dars.filter((d) => d.department === effectiveDept),
+    [dars, hasAllDeptKpiAccess, effectiveDept]
+  );
+
+  const summary = computeDccKpis(
+    scopedDocuments,
+    scopedDars,
+    visibleDepartments,
+    todayStr,
+    targets
+  );
   const canEditTargets =
     Boolean(currentUser.isAdmin) ||
-    currentUser.role === 'Document Controller' ||
-    currentUser.role === 'QMR / Approver';
+    currentUser.username.toLowerCase() === 'dcc' ||
+    userRoleDef?.department === 'ALL';
 
-  const activeDocsList = documents.filter((d) => d.status === 'Active');
+  const activeDocsList = scopedDocuments.filter((d) => d.status === 'Active');
 
   return (
     <div className="space-y-6">
@@ -379,9 +436,16 @@ export const KpiView: React.FC<KpiViewProps> = ({
         <div className="space-y-6">
           {/* Department Selector Strip */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-4 no-print">
+            {!hasAllDeptKpiAccess && (
+              <div className="text-xs text-slate-600 dark:text-slate-300">
+                {lang === 'th'
+                  ? `สิทธิ์การเข้าถึง: แสดงเฉพาะตัวชี้วัดคุณภาพของแผนก ${effectiveDept} (${currentUser.role})`
+                  : `Access Scope: Showing KPI data strictly for department ${effectiveDept} (${currentUser.role})`}
+              </div>
+            )}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-1.5">
-                {departments.map((dept) => {
+                {visibleDepartments.map((dept) => {
                   const deptFb = fishbones.find((f) => f.department === dept.code);
                   const isSelected = selectedDept === dept.code;
                   const met = deptFb ? isHeadMet(deptFb) : true;
