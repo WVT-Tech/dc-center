@@ -1,0 +1,6 @@
+{
+  "name": "Document Control Center",
+  "description": "ระบบควบคุมเอกสารกลางมาตรฐาน ISO (Document Control Center) สำหรับจัดการทะเบียนเอกสารหลัก คำขอดำเนินการเอกสาร (DAR) การอนุมัติ การแจกจ่าย และประวัติการแก้ไข",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
