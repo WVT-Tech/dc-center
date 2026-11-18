@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Menu } from 'lucide-react';
 import {
   AuditActionType,
@@ -194,8 +194,34 @@ export default function App() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [dbInfo, setDbInfo] = useState<DbConnectionInfo | null>(null);
   const [dbBusy, setDbBusy] = useState(false);
+  const [isHydratingDb, setIsHydratingDb] = useState<boolean>(true);
+  const [dbLoadError, setDbLoadError] = useState<string | null>(null);
   const dbHydratedRef = useRef(false);
   const skipNextSyncRef = useRef(false);
+  const pendingSyncRef = useRef(false);
+  const latestDomainPayloadRef = useRef({
+    documents,
+    dars,
+    departments,
+    auditEvents,
+    fishbones,
+    users,
+    roles,
+    kpiTargets,
+    docCodeConfig,
+  });
+
+  latestDomainPayloadRef.current = {
+    documents,
+    dars,
+    departments,
+    auditEvents,
+    fishbones,
+    users,
+    roles,
+    kpiTargets,
+    docCodeConfig,
+  };
 
   const currentUser: UserProfile = useMemo(
     () => users.find((u) => u.id === authenticatedUserId) ?? users[0],
@@ -251,84 +277,108 @@ export default function App() {
   }, [darkMode]);
 
   // Initial load from Cloudflare D1 / SQLite backend
-  useEffect(() => {
-    let cancelled = false;
-    async function hydrateFromD1() {
-      try {
-        const res = await fetch('/api/dcc/state');
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          ok: boolean;
-          empty: boolean;
-          state: {
-            documents: ControlledDocument[];
-            dars: DocumentActionRequest[];
-            departments: DepartmentInfo[];
-            auditEvents: AuditEvent[];
-            fishbones: DepartmentKpiFishbone[];
-            users: UserProfile[];
-            roles?: RoleDefinition[];
-            kpiTargets: KpiTargets;
-            docCodeConfig?: DocCodeConfig;
-          } | null;
-          dbInfo?: DbConnectionInfo;
-        };
-        if (cancelled) return;
-        if (data.dbInfo) setDbInfo(data.dbInfo);
+  const hydrateFromD1 = useCallback(async () => {
+    setIsHydratingDb(true);
+    setDbLoadError(null);
+    try {
+      const res = await fetch('/api/dcc/state', { cache: 'no-store' });
+      const data = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        empty?: boolean;
+        error?: string;
+        state?: {
+          documents: ControlledDocument[];
+          dars: DocumentActionRequest[];
+          departments: DepartmentInfo[];
+          auditEvents: AuditEvent[];
+          fishbones: DepartmentKpiFishbone[];
+          users: UserProfile[];
+          roles?: RoleDefinition[];
+          kpiTargets: KpiTargets;
+          docCodeConfig?: DocCodeConfig;
+        } | null;
+        dbInfo?: DbConnectionInfo;
+      } | null;
 
-        if (!data.empty && data.state) {
-          skipNextSyncRef.current = true;
-          setDocuments(data.state.documents);
-          setDars(data.state.dars);
-          setDepartments(data.state.departments);
-          setAuditEvents(data.state.auditEvents);
-          setFishbones(data.state.fishbones);
-          setUsers(data.state.users);
-          if (data.state.roles && data.state.roles.length > 0) {
-            setRoles(data.state.roles);
-          }
-          setKpiTargets(data.state.kpiTargets);
-          if (data.state.docCodeConfig) {
-            setDocCodeConfig(data.state.docCodeConfig);
-          }
-        } else {
-          // Database is empty: seed it immediately with current initial state
-          const syncRes = await fetch('/api/dcc/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              state: {
-                documents,
-                dars,
-                departments,
-                auditEvents,
-                fishbones,
-                users,
-                roles,
-                kpiTargets,
-                docCodeConfig,
-              },
-              replaceAll: false,
-            }),
-          });
-          if (syncRes.ok) {
-            const syncJson = (await syncRes.json()) as { dbInfo?: DbConnectionInfo };
-            if (!cancelled && syncJson.dbInfo) setDbInfo(syncJson.dbInfo);
-          }
-        }
-      } catch {
-        // Keep localStorage cache working if server is momentarily unavailable
-      } finally {
-        if (!cancelled) dbHydratedRef.current = true;
+      if (data?.dbInfo) setDbInfo(data.dbInfo);
+
+      if (!res.ok || !data || !data.ok) {
+        const errMsg =
+          data?.error ||
+          (lang === 'th'
+            ? `เชื่อมต่อฐานข้อมูล D1 ไม่สำเร็จ (HTTP ${res.status})`
+            : `Failed to connect to D1 database (HTTP ${res.status})`);
+        setDbLoadError(errMsg);
+        return;
       }
+
+      if (!data.empty && data.state) {
+        skipNextSyncRef.current = true;
+        setDocuments(data.state.documents ?? []);
+        setDars(data.state.dars ?? []);
+        if (data.state.departments && data.state.departments.length > 0) {
+          setDepartments(data.state.departments);
+        }
+        setAuditEvents(data.state.auditEvents ?? []);
+        setFishbones(data.state.fishbones ?? []);
+        if (data.state.users && data.state.users.length > 0) {
+          setUsers(data.state.users);
+        }
+        if (data.state.roles && data.state.roles.length > 0) {
+          setRoles(data.state.roles);
+        }
+        if (data.state.kpiTargets) {
+          setKpiTargets(data.state.kpiTargets);
+        }
+        if (data.state.docCodeConfig) {
+          setDocCodeConfig(data.state.docCodeConfig);
+        }
+        dbHydratedRef.current = true;
+      } else {
+        // Remote DB is genuinely empty: seed once from current state
+        const syncRes = await fetch('/api/dcc/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            state: latestDomainPayloadRef.current,
+            replaceAll: false,
+          }),
+        });
+        const syncJson = (await syncRes.json().catch(() => null)) as {
+          ok?: boolean;
+          error?: string;
+          dbInfo?: DbConnectionInfo;
+        } | null;
+        if (syncJson?.dbInfo) setDbInfo(syncJson.dbInfo);
+        if (syncRes.ok && syncJson?.ok) {
+          dbHydratedRef.current = true;
+        } else {
+          setDbLoadError(
+            syncJson?.error ||
+              (lang === 'th'
+                ? 'ไม่สามารถบันทึกข้อมูลเริ่มต้นลงฐานข้อมูล D1 ได้'
+                : 'Failed to initialize D1 database')
+          );
+        }
+      }
+    } catch {
+      setDbLoadError(
+        lang === 'th'
+          ? 'ไม่สามารถติดต่อเซิร์ฟเวอร์ฐานข้อมูล D1 ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตหรือการผูก D1'
+          : 'Unable to reach D1 database server. Please verify connection or D1 binding.'
+      );
+    } finally {
+      setIsHydratingDb(false);
     }
+  }, [lang]);
+
+  useEffect(() => {
     hydrateFromD1();
-    return () => {
-      cancelled = true;
-    };
+    // Run once on mount; manual retry uses hydrateFromD1 directly
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist locally + sync mutations to Cloudflare D1 / SQLite backend
+  // Persist browser cache (including session, language, theme)
   useEffect(() => {
     try {
       const payload: PersistedState = {
@@ -349,14 +399,56 @@ export default function App() {
     } catch {
       // Ignore storage quota overflow gracefully
     }
+  }, [
+    documents,
+    dars,
+    departments,
+    auditEvents,
+    fishbones,
+    users,
+    roles,
+    kpiTargets,
+    docCodeConfig,
+    authenticatedUserId,
+    lang,
+    darkMode,
+  ]);
 
+  // Flush any pending D1 sync if user refreshes/closes tab immediately after saving
+  useEffect(() => {
+    const flushPendingSync = () => {
+      if (!pendingSyncRef.current || !dbHydratedRef.current) return;
+      pendingSyncRef.current = false;
+      try {
+        fetch('/api/dcc/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: latestDomainPayloadRef.current }),
+          keepalive: true,
+        }).catch(() => {});
+      } catch {
+        // Ignore unload flush errors
+      }
+    };
+    window.addEventListener('pagehide', flushPendingSync);
+    window.addEventListener('beforeunload', flushPendingSync);
+    return () => {
+      window.removeEventListener('pagehide', flushPendingSync);
+      window.removeEventListener('beforeunload', flushPendingSync);
+    };
+  }, []);
+
+  // Sync domain mutations (users, roles, departments, documents, DARs, KPI, settings) to Cloudflare D1
+  useEffect(() => {
     if (!dbHydratedRef.current) return;
     if (skipNextSyncRef.current) {
       skipNextSyncRef.current = false;
       return;
     }
 
+    pendingSyncRef.current = true;
     const timer = window.setTimeout(async () => {
+      pendingSyncRef.current = false;
       try {
         const res = await fetch('/api/dcc/sync', {
           method: 'POST',
@@ -375,14 +467,28 @@ export default function App() {
             },
           }),
         });
-        if (res.ok) {
-          const json = (await res.json()) as { dbInfo?: DbConnectionInfo };
-          if (json.dbInfo) setDbInfo(json.dbInfo);
+        const json = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          error?: string;
+          dbInfo?: DbConnectionInfo;
+        } | null;
+        if (json?.dbInfo) setDbInfo(json.dbInfo);
+        if (!res.ok || !json?.ok) {
+          setToastMsg(
+            json?.error ||
+              (lang === 'th'
+                ? 'คำเตือน: บันทึกข้อมูลลงฐานข้อมูล D1 ไม่สำเร็จ'
+                : 'Warning: Failed to sync changes to D1 database')
+          );
         }
       } catch {
-        // Silent retry on next mutation or manual sync
+        setToastMsg(
+          lang === 'th'
+            ? 'คำเตือน: ไม่สามารถเชื่อมต่อฐานข้อมูล D1 เพื่อซิงค์ข้อมูลล่าสุดได้'
+            : 'Warning: Could not reach D1 database to sync latest changes'
+        );
       }
-    }, 350);
+    }, 80);
 
     return () => window.clearTimeout(timer);
   }, [
@@ -395,9 +501,7 @@ export default function App() {
     roles,
     kpiTargets,
     docCodeConfig,
-    authenticatedUserId,
     lang,
-    darkMode,
   ]);
 
   const showToast = (msg: string) => {
@@ -1160,6 +1264,8 @@ export default function App() {
         showToast(json.error || (lang === 'th' ? 'ไม่สามารถซิงค์ฐานข้อมูล D1 ได้' : 'D1 sync failed'));
         return;
       }
+      dbHydratedRef.current = true;
+      setDbLoadError(null);
       showToast(
         lang === 'th'
           ? 'สร้างตารางและซิงค์ข้อมูลเข้าสู่ฐานข้อมูล D1 เรียบร้อยแล้ว'
@@ -1175,7 +1281,7 @@ export default function App() {
   const handlePullDatabase = async () => {
     setDbBusy(true);
     try {
-      const res = await fetch('/api/dcc/state');
+      const res = await fetch('/api/dcc/state', { cache: 'no-store' });
       const json = (await res.json()) as {
         ok: boolean;
         empty: boolean;
@@ -1198,6 +1304,8 @@ export default function App() {
         showToast(json.error || (lang === 'th' ? 'โหลดข้อมูลจาก D1 ไม่สำเร็จ' : 'Failed to pull from D1'));
         return;
       }
+      dbHydratedRef.current = true;
+      setDbLoadError(null);
       if (!json.empty && json.state) {
         skipNextSyncRef.current = true;
         setDocuments(json.state.documents);
@@ -1254,6 +1362,9 @@ export default function App() {
         darkMode={darkMode}
         onToggleDark={() => setDarkMode((prev) => !prev)}
         users={users}
+        isHydratingDb={isHydratingDb}
+        dbLoadError={dbLoadError}
+        onRetryDb={hydrateFromD1}
         onLoginSuccess={handleLoginSuccess}
       />
     );

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Eye, EyeOff, Lock, Moon, Sun, User } from 'lucide-react';
+import { AlertTriangle, Eye, EyeOff, Loader2, Lock, Moon, RefreshCw, Sun, User } from 'lucide-react';
 import { Language, UserProfile } from '../types/dcc';
 import { t } from '../i18n/translations';
 
@@ -9,6 +9,9 @@ interface LoginScreenProps {
   darkMode: boolean;
   onToggleDark: () => void;
   users: UserProfile[];
+  isHydratingDb?: boolean;
+  dbLoadError?: string | null;
+  onRetryDb?: () => void;
   onLoginSuccess: (user: UserProfile) => void;
 }
 
@@ -18,6 +21,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   darkMode,
   onToggleDark,
   users,
+  isHydratingDb = false,
+  dbLoadError = null,
+  onRetryDb,
   onLoginSuccess,
 }) => {
   const [username, setUsername] = useState('');
@@ -173,6 +179,46 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               </div>
             </div>
 
+            {isHydratingDb && (
+              <div className="p-3 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/30 text-xs text-blue-700 dark:text-blue-300 flex items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                <span>
+                  {lang === 'th'
+                    ? 'กำลังโหลดข้อมูลผู้ใช้งานและสิทธิ์ล่าสุดจากฐานข้อมูล D1...'
+                    : 'Loading latest users & permissions from D1 database...'}
+                </span>
+              </div>
+            )}
+
+            {!isHydratingDb && dbLoadError && (
+              <div
+                role="alert"
+                className="p-3 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 text-xs text-amber-800 dark:text-amber-200 space-y-2"
+              >
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <div className="font-semibold">
+                      {lang === 'th'
+                        ? 'ไม่สามารถโหลดข้อมูลจากฐานข้อมูล D1 ได้'
+                        : 'Unable to load state from D1 database'}
+                    </div>
+                    <div className="text-[11px] opacity-90">{dbLoadError}</div>
+                  </div>
+                </div>
+                {onRetryDb && (
+                  <button
+                    type="button"
+                    onClick={onRetryDb}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-[11px] font-medium hover:bg-amber-100/60 dark:hover:bg-amber-900/40 transition-colors"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>{lang === 'th' ? 'ลองเชื่อมต่อฐานข้อมูลอีกครั้ง' : 'Retry D1 Connection'}</span>
+                  </button>
+                )}
+              </div>
+            )}
+
             {errorMsg && (
               <div
                 role="alert"
@@ -184,9 +230,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
             <button
               type="submit"
-              className="w-full py-2.5 px-4 text-sm font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white hover:bg-slate-800 dark:hover:bg-blue-500 transition-colors"
+              disabled={isHydratingDb}
+              className="w-full py-2.5 px-4 text-sm font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white hover:bg-slate-800 dark:hover:bg-blue-500 disabled:opacity-60 disabled:cursor-wait transition-colors"
             >
-              {t(lang, 'loginButton')}
+              {isHydratingDb
+                ? lang === 'th'
+                  ? 'กำลังเชื่อมต่อฐานข้อมูล...'
+                  : 'Connecting to database...'
+                : t(lang, 'loginButton')}
             </button>
           </form>
         </div>
