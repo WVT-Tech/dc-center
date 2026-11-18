@@ -24,6 +24,7 @@ interface MasterListViewProps {
   departments: DepartmentInfo[];
   docTypes?: DocTypeDefinition[];
   globalSearch: string;
+  canPrint?: boolean;
   onGlobalSearchChange: (value: string) => void;
   onOpenDocument: (docId: string) => void;
   onCreateNewDar: () => void;
@@ -37,6 +38,7 @@ export const MasterListView: React.FC<MasterListViewProps> = ({
   departments,
   docTypes = DEFAULT_DOC_TYPES,
   globalSearch,
+  canPrint = true,
   onGlobalSearchChange,
   onOpenDocument,
   onCreateNewDar,
@@ -129,7 +131,15 @@ export const MasterListView: React.FC<MasterListViewProps> = ({
   };
 
   return (
-    <div className="space-y-5">
+    <>
+      {!canPrint && (
+        <div className="hidden print-blocked-notice p-8 text-center text-sm text-slate-700 border border-slate-300 rounded-xl">
+          {lang === 'th'
+            ? 'ไม่อนุญาตให้สั่งพิมพ์เอกสารในเมนูทะเบียนเอกสารหลัก (สำหรับผู้ใช้งานที่มี Role แบบ All เท่านั้น)'
+            : 'Printing from Master Document List is restricted to users with an All-department role.'}
+        </div>
+      )}
+      <div className={`space-y-5 ${!canPrint ? 'print-blocked' : ''}`}>
       {/* Toolbar: Search, Filters & Exports */}
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-4 no-print">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
@@ -180,14 +190,16 @@ export const MasterListView: React.FC<MasterListViewProps> = ({
               <span>{t(lang, 'exportCsv')}</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => window.print()}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              <span>{t(lang, 'printMdl')}</span>
-            </button>
+            {canPrint && (
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>{t(lang, 'printMdl')}</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -344,6 +356,7 @@ export const MasterListView: React.FC<MasterListViewProps> = ({
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 };

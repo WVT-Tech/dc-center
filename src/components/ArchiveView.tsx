@@ -6,18 +6,28 @@ import { t } from '../i18n/translations';
 interface ArchiveViewProps {
   lang: Language;
   documents: ControlledDocument[];
+  canPrint?: boolean;
   onOpenDocument: (docId: string) => void;
 }
 
 export const ArchiveView: React.FC<ArchiveViewProps> = ({
   lang,
   documents,
+  canPrint = true,
   onOpenDocument,
 }) => {
   const obsoleteDocs = documents.filter((d) => d.status === 'Obsolete');
 
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+    <>
+      {!canPrint && (
+        <div className="hidden print-blocked-notice p-8 text-center text-sm text-slate-700 border border-slate-300 rounded-xl">
+          {lang === 'th'
+            ? 'ไม่อนุญาตให้สั่งพิมพ์เอกสารในเมนูคลังเอกสารยกเลิก (สำหรับผู้ใช้งานที่มี Role แบบ All เท่านั้น)'
+            : 'Printing from Obsolete Archive is restricted to users with an All-department role.'}
+        </div>
+      )}
+      <div className={`rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden ${!canPrint ? 'print-blocked' : ''}`}>
       <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
@@ -87,6 +97,7 @@ export const ArchiveView: React.FC<ArchiveViewProps> = ({
           ))}
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 };

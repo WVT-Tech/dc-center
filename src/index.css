@@ -26,8 +26,13 @@
 @media print {
   aside,
   header,
-  .no-print {
+  .no-print,
+  .print-blocked {
     display: none !important;
+  }
+
+  .print-blocked-notice {
+    display: block !important;
   }
 
   main {

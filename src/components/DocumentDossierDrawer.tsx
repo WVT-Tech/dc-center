@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Clock,
   FileEdit,
+  Lock,
   Paperclip,
   Printer,
   X,
@@ -11,11 +12,13 @@ import {
 import { ControlledDocument, Language, UserProfile } from '../types/dcc';
 import { t } from '../i18n/translations';
 import { DocStatusLabel } from './StatusLabel';
+import { PdfReadOnlyViewer } from './PdfReadOnlyViewer';
 
 interface DocumentDossierDrawerProps {
   lang: Language;
   doc: ControlledDocument | null;
   currentUser: UserProfile;
+  canPrint?: boolean;
   onClose: () => void;
   onRequestRevision: (doc: ControlledDocument) => void;
   onRequestObsolete: (doc: ControlledDocument) => void;
@@ -28,6 +31,7 @@ export const DocumentDossierDrawer: React.FC<DocumentDossierDrawerProps> = ({
   lang,
   doc,
   currentUser,
+  canPrint = true,
   onClose,
   onRequestRevision,
   onRequestObsolete,
@@ -45,7 +49,7 @@ export const DocumentDossierDrawer: React.FC<DocumentDossierDrawerProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div className={`fixed inset-0 z-50 flex justify-end ${!canPrint ? 'print-blocked' : ''}`}>
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-slate-950/50 backdrop-blur-[1px]"
@@ -53,7 +57,14 @@ export const DocumentDossierDrawer: React.FC<DocumentDossierDrawerProps> = ({
       />
 
       {/* Drawer Panel */}
-      <div className="relative z-10 w-full max-w-3xl bg-white dark:bg-slate-900 h-full shadow-2xl border-l border-slate-200 dark:border-slate-800 flex flex-col">
+      <div
+        onContextMenu={(e) => {
+          if (!canPrint) e.preventDefault();
+        }}
+        className={`relative z-10 w-full max-w-3xl bg-white dark:bg-slate-900 h-full shadow-2xl border-l border-slate-200 dark:border-slate-800 flex flex-col ${
+          !canPrint ? 'select-none' : ''
+        }`}
+      >
         {/* Top Bar */}
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-4 shrink-0">
           <div className="min-w-0">
@@ -274,7 +285,7 @@ export const DocumentDossierDrawer: React.FC<DocumentDossierDrawerProps> = ({
                           {t(lang, 'attachmentLabel')}: {doc.content.attachmentName}
                         </span>
                       </span>
-                      {doc.content.attachmentDataUrl && (
+                      {canPrint && doc.content.attachmentDataUrl && (
                         <a
                           href={doc.content.attachmentDataUrl}
                           download={doc.content.attachmentName}
@@ -290,21 +301,38 @@ export const DocumentDossierDrawer: React.FC<DocumentDossierDrawerProps> = ({
                         <img
                           src={doc.content.attachmentDataUrl}
                           alt={doc.content.attachmentName}
-                          className="max-h-72 rounded-lg border border-slate-200 dark:border-slate-700 object-contain"
+                          draggable={canPrint}
+                          onContextMenu={(e) => {
+                            if (!canPrint) e.preventDefault();
+                          }}
+                          className={`max-h-72 rounded-lg border border-slate-200 dark:border-slate-700 object-contain ${
+                            !canPrint ? 'select-none' : ''
+                          }`}
                         />
                       )}
 
                     {doc.content.attachmentType === 'application/pdf' &&
-                      doc.content.attachmentDataUrl && (
+                      doc.content.attachmentDataUrl &&
+                      (canPrint ? (
                         <iframe
                           src={doc.content.attachmentDataUrl}
                           title={doc.content.attachmentName}
                           className="w-full h-80 rounded-lg border border-slate-200 dark:border-slate-700"
                         />
-                      )}
+                      ) : (
+                        <PdfReadOnlyViewer
+                          dataUrl={doc.content.attachmentDataUrl}
+                          title={doc.content.attachmentName}
+                          lang={lang}
+                        />
+                      ))}
 
                     {doc.content.attachmentTextPreview && (
-                      <pre className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono overflow-x-auto whitespace-pre-wrap">
+                      <pre
+                        className={`p-3 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono overflow-x-auto whitespace-pre-wrap ${
+                          !canPrint ? 'select-none' : ''
+                        }`}
+                      >
                         {doc.content.attachmentTextPreview}
                       </pre>
                     )}
@@ -394,14 +422,25 @@ export const DocumentDossierDrawer: React.FC<DocumentDossierDrawerProps> = ({
 
         {/* Footer Actions */}
         <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/50 flex flex-wrap items-center justify-between gap-3 shrink-0 no-print">
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span>{t(lang, 'printControlledCopy')}</span>
-          </button>
+          {canPrint ? (
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>{t(lang, 'printControlledCopy')}</span>
+            </button>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+              <Lock className="w-3.5 h-3.5 text-amber-500" />
+              <span>
+                {lang === 'th'
+                  ? 'อ่านอย่างเดียว (Role เฉพาะแผนกไม่สามารถสั่งพิมพ์ได้)'
+                  : 'Read-only (Printing requires an All-department role)'}
+              </span>
+            </span>
+          )}
 
           {!isObsolete && (
             <div className="flex items-center gap-2">

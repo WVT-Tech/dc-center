@@ -225,6 +225,28 @@ export default function App() {
   }, [hasAllRoleAccess, activeNav]);
 
   useEffect(() => {
+    const isRestrictedPrintContext =
+      !hasAllRoleAccess &&
+      (activeNav === 'master-list' || activeNav === 'archive' || selectedDocId !== null);
+    if (!isRestrictedPrintContext) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        e.stopPropagation();
+        setToastMsg(
+          lang === 'th'
+            ? 'สิทธิ์ Role เฉพาะแผนกไม่ได้รับอนุญาตให้สั่งพิมพ์เอกสารในหน้านี้'
+            : 'Printing is restricted to All-department roles on this screen.'
+        );
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [hasAllRoleAccess, activeNav, selectedDocId, lang]);
+
+  useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
   }, [darkMode]);
 
@@ -1328,6 +1350,7 @@ export default function App() {
               departments={departments}
               docTypes={docCodeConfig.docTypes}
               globalSearch={globalSearch}
+              canPrint={hasAllRoleAccess}
               onGlobalSearchChange={setGlobalSearch}
               onOpenDocument={(id) => setSelectedDocId(id)}
               onCreateNewDar={() =>
@@ -1358,6 +1381,7 @@ export default function App() {
             <ArchiveView
               lang={lang}
               documents={documents}
+              canPrint={hasAllRoleAccess}
               onOpenDocument={(id) => setSelectedDocId(id)}
             />
           )}
@@ -1400,6 +1424,7 @@ export default function App() {
         lang={lang}
         doc={selectedDoc}
         currentUser={currentUser}
+        canPrint={hasAllRoleAccess}
         onClose={() => setSelectedDocId(null)}
         onRequestRevision={(doc) => {
           setSelectedDocId(null);
