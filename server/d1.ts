@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import type {
   AuditEvent,
   ControlledDocument,
@@ -200,14 +200,17 @@ export class D1DatabaseClient {
     return Boolean(this.accountId && this.databaseId && this.apiToken);
   }
 
-  private getLocalDb(): DatabaseSync {
+  private async getLocalDb(): Promise<DatabaseSync> {
     if (!this.localDb) {
-      const dataDir = path.resolve(process.cwd(), 'data');
+      const { DatabaseSync: SqliteDatabaseSync } = await import('node:sqlite');
+      const dataDir = process.env.VERCEL
+        ? path.resolve('/tmp', 'dcc-data')
+        : path.resolve(process.cwd(), 'data');
       if (!fs.existsSync(dataDir)) {
         fs.mkdirSync(dataDir, { recursive: true });
       }
       const dbPath = path.join(dataDir, 'dcc.sqlite');
-      this.localDb = new DatabaseSync(dbPath);
+      this.localDb = new SqliteDatabaseSync(dbPath);
       this.localDb.exec('PRAGMA journal_mode = WAL;');
     }
     return this.localDb;
@@ -245,7 +248,7 @@ export class D1DatabaseClient {
       return firstResult?.results ?? [];
     }
 
-    const db = this.getLocalDb();
+    const db = await this.getLocalDb();
     const stmt = db.prepare(sql);
     const upper = sql.trim().toUpperCase();
     if (upper.startsWith('SELECT') || upper.startsWith('PRAGMA')) {
@@ -741,4 +744,7 @@ export class D1DatabaseClient {
   }
 }
 
+export const SCHEMA_SQL = SCHEMA_STATEMENTS.join(';\n\n') + ';\n';
+
 export const d1Client = new D1DatabaseClient();
+
