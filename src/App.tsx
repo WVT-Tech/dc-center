@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FilePlus2, Menu } from 'lucide-react';
+import { Menu } from 'lucide-react';
 import {
   AuditActionType,
   AuditEvent,
@@ -13,6 +13,7 @@ import {
   DbConnectionInfo,
   DepartmentInfo,
   DepartmentKpiFishbone,
+  DocCodeConfig,
   DocumentActionRequest,
   KpiTargets,
   Language,
@@ -22,6 +23,7 @@ import {
 } from './types/dcc';
 import { t } from './i18n/translations';
 import { DEFAULT_KPI_TARGETS } from './utils/kpiMetrics';
+import { DEFAULT_DOC_CODE_CONFIG } from './utils/docCode';
 import { LoginScreen } from './components/LoginScreen';
 import { Sidebar } from './components/Sidebar';
 import { OverviewView } from './components/OverviewView';
@@ -46,6 +48,7 @@ interface PersistedState {
   users: UserProfile[];
   roles?: RoleDefinition[];
   kpiTargets?: KpiTargets;
+  docCodeConfig?: DocCodeConfig;
   authenticatedUserId: string | null;
   lang: Language;
   darkMode: boolean;
@@ -114,6 +117,7 @@ function getInitialState(): PersistedState {
           users: parsed.users && parsed.users.length > 0 ? parsed.users : [DEFAULT_ADMIN_USER],
           roles: parsed.roles && parsed.roles.length > 0 ? parsed.roles : DEFAULT_ROLES,
           kpiTargets: parsed.kpiTargets ?? DEFAULT_KPI_TARGETS,
+          docCodeConfig: parsed.docCodeConfig ?? DEFAULT_DOC_CODE_CONFIG,
           authenticatedUserId:
             parsed.authenticatedUserId !== undefined ? parsed.authenticatedUserId : null,
           lang: parsed.lang ?? 'th',
@@ -133,6 +137,7 @@ function getInitialState(): PersistedState {
     users: [DEFAULT_ADMIN_USER],
     roles: DEFAULT_ROLES,
     kpiTargets: DEFAULT_KPI_TARGETS,
+    docCodeConfig: DEFAULT_DOC_CODE_CONFIG,
     authenticatedUserId: null,
     lang: 'th',
     darkMode: false,
@@ -167,6 +172,9 @@ export default function App() {
   const [roles, setRoles] = useState<RoleDefinition[]>(initial.roles ?? DEFAULT_ROLES);
   const [kpiTargets, setKpiTargets] = useState<KpiTargets>(
     initial.kpiTargets ?? DEFAULT_KPI_TARGETS
+  );
+  const [docCodeConfig, setDocCodeConfig] = useState<DocCodeConfig>(
+    initial.docCodeConfig ?? DEFAULT_DOC_CODE_CONFIG
   );
   const [authenticatedUserId, setAuthenticatedUserId] = useState<string | null>(
     initial.authenticatedUserId
@@ -217,6 +225,7 @@ export default function App() {
             users: UserProfile[];
             roles?: RoleDefinition[];
             kpiTargets: KpiTargets;
+            docCodeConfig?: DocCodeConfig;
           } | null;
           dbInfo?: DbConnectionInfo;
         };
@@ -235,6 +244,9 @@ export default function App() {
             setRoles(data.state.roles);
           }
           setKpiTargets(data.state.kpiTargets);
+          if (data.state.docCodeConfig) {
+            setDocCodeConfig(data.state.docCodeConfig);
+          }
         } else {
           // Database is empty: seed it immediately with current initial state
           const syncRes = await fetch('/api/dcc/sync', {
@@ -250,6 +262,7 @@ export default function App() {
                 users,
                 roles,
                 kpiTargets,
+                docCodeConfig,
               },
               replaceAll: false,
             }),
@@ -283,6 +296,7 @@ export default function App() {
         users,
         roles,
         kpiTargets,
+        docCodeConfig,
         authenticatedUserId,
         lang,
         darkMode,
@@ -313,6 +327,7 @@ export default function App() {
               users,
               roles,
               kpiTargets,
+              docCodeConfig,
             },
           }),
         });
@@ -335,6 +350,7 @@ export default function App() {
     users,
     roles,
     kpiTargets,
+    docCodeConfig,
     authenticatedUserId,
     lang,
     darkMode,
@@ -739,6 +755,124 @@ export default function App() {
     );
   };
 
+  const handleUpdateDepartment = (originalCode: string, updatedDept: DepartmentInfo) => {
+    const oldCode = originalCode.trim().toUpperCase();
+    const newCode = updatedDept.code.trim().toUpperCase();
+    if (!newCode) return;
+    if (newCode !== oldCode && departments.some((d) => d.code === newCode)) {
+      showToast(
+        lang === 'th'
+          ? `รหัสหน่วยงาน ${newCode} มีอยู่ในระบบแล้ว`
+          : `Department code ${newCode} already exists`
+      );
+      return;
+    }
+
+    const normalized: DepartmentInfo = {
+      ...updatedDept,
+      code: newCode,
+    };
+
+    setDepartments((prev) => prev.map((d) => (d.code === oldCode ? normalized : d)));
+
+    if (newCode !== oldCode) {
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.department === oldCode
+            ? {
+                ...u,
+                department: newCode,
+                titleTh: u.role ? `${u.role} (${newCode})` : u.titleTh,
+                titleEn: u.role ? `${u.role} (${newCode})` : u.titleEn,
+              }
+            : u
+        )
+      );
+      setRoles((prev) =>
+        prev.map((r) => (r.department === oldCode ? { ...r, department: newCode } : r))
+      );
+      setDocuments((prev) =>
+        prev.map((doc) => (doc.department === oldCode ? { ...doc, department: newCode } : doc))
+      );
+      setDars((prev) =>
+        prev.map((dar) => ({
+          ...dar,
+          department: dar.department === oldCode ? newCode : dar.department,
+          requesterDept: dar.requesterDept === oldCode ? newCode : dar.requesterDept,
+        }))
+      );
+      setFishbones((prev) =>
+        prev.map((fb) => (fb.department === oldCode ? { ...fb, department: newCode } : fb))
+      );
+    }
+
+    appendAudit(
+      'DEPT_UPDATED',
+      newCode,
+      `แก้ไขรหัสหน่วยงาน ${oldCode}${newCode !== oldCode ? ` → ${newCode}` : ''} (${normalized.nameTh})`,
+      `Updated department ${oldCode}${newCode !== oldCode ? ` → ${newCode}` : ''} (${normalized.nameEn})`
+    );
+    showToast(
+      lang === 'th'
+        ? `อัปเดตหน่วยงาน ${newCode} เรียบร้อยแล้ว`
+        : `Updated department ${newCode}`
+    );
+  };
+
+  const handleDeleteDepartment = (deptCode: string) => {
+    if (departments.length <= 1) {
+      showToast(
+        lang === 'th'
+          ? 'ไม่สามารถลบได้ ต้องมีรหัสหน่วยงานอย่างน้อย 1 รายการ'
+          : 'At least one department must remain'
+      );
+      return;
+    }
+
+    const usedByUsers = users.filter((u) => u.department === deptCode).length;
+    const usedByDocs = documents.filter((d) => d.department === deptCode).length;
+    const usedByDars = dars.filter((d) => d.department === deptCode).length;
+    const usedByFishbones = fishbones.filter((f) => f.department === deptCode).length;
+
+    if (usedByUsers > 0 || usedByDocs > 0 || usedByDars > 0 || usedByFishbones > 0) {
+      showToast(
+        lang === 'th'
+          ? `ไม่สามารถลบหน่วยงาน ${deptCode} ได้ เนื่องจากถูกใช้งานอยู่ (ผู้ใช้ ${usedByUsers}, เอกสาร ${usedByDocs}, DAR ${usedByDars}, KPI ${usedByFishbones})`
+          : `Cannot delete ${deptCode}: referenced by ${usedByUsers} users, ${usedByDocs} docs, ${usedByDars} DARs`
+      );
+      return;
+    }
+
+    const target = departments.find((d) => d.code === deptCode);
+    setDepartments((prev) => prev.filter((d) => d.code !== deptCode));
+    // Also clean up unused department-scoped roles bound solely to this removed department
+    setRoles((prev) => prev.filter((r) => r.isSystem || r.department !== deptCode));
+    appendAudit(
+      'DEPT_DELETED',
+      deptCode,
+      `ลบรหัสหน่วยงาน ${deptCode}${target ? ` — ${target.nameTh}` : ''}`,
+      `Deleted department ${deptCode}${target ? ` — ${target.nameEn}` : ''}`
+    );
+    showToast(
+      lang === 'th' ? `ลบรหัสหน่วยงาน ${deptCode} เรียบร้อยแล้ว` : `Deleted department ${deptCode}`
+    );
+  };
+
+  const handleUpdateDocCodeConfig = (nextConfig: DocCodeConfig) => {
+    setDocCodeConfig(nextConfig);
+    appendAudit(
+      'DOC_SCHEMA_UPDATED',
+      nextConfig.pattern,
+      `อัปเดตโครงสร้างรหัสเอกสารเป็น ${nextConfig.pattern} (ประเภทเอกสาร ${nextConfig.docTypes.length} รายการ)`,
+      `Updated document numbering schema to ${nextConfig.pattern} (${nextConfig.docTypes.length} document types)`
+    );
+    showToast(
+      lang === 'th'
+        ? 'บันทึกโครงสร้างรหัสเอกสารเรียบร้อยแล้ว'
+        : 'Saved document numbering schema'
+    );
+  };
+
   const handleUpsertFishbone = (fb: DepartmentKpiFishbone) => {
     setFishbones((prev) => {
       const exists = prev.some((item) => item.id === fb.id);
@@ -922,6 +1056,7 @@ export default function App() {
     setUsers([DEFAULT_ADMIN_USER]);
     setRoles(DEFAULT_ROLES);
     setKpiTargets(DEFAULT_KPI_TARGETS);
+    setDocCodeConfig(DEFAULT_DOC_CODE_CONFIG);
     localStorage.removeItem(STORAGE_KEY);
     setDbBusy(true);
     try {
@@ -938,6 +1073,7 @@ export default function App() {
             users: [DEFAULT_ADMIN_USER],
             roles: DEFAULT_ROLES,
             kpiTargets: DEFAULT_KPI_TARGETS,
+            docCodeConfig: DEFAULT_DOC_CODE_CONFIG,
           },
           replaceAll: true,
         }),
@@ -970,6 +1106,7 @@ export default function App() {
             users,
             roles,
             kpiTargets,
+            docCodeConfig,
           },
         }),
       });
@@ -1007,6 +1144,7 @@ export default function App() {
           users: UserProfile[];
           roles?: RoleDefinition[];
           kpiTargets: KpiTargets;
+          docCodeConfig?: DocCodeConfig;
         } | null;
         dbInfo?: DbConnectionInfo;
         error?: string;
@@ -1028,6 +1166,9 @@ export default function App() {
           setRoles(json.state.roles);
         }
         setKpiTargets(json.state.kpiTargets);
+        if (json.state.docCodeConfig) {
+          setDocCodeConfig(json.state.docCodeConfig);
+        }
         showToast(
           lang === 'th' ? 'โหลดข้อมูลล่าสุดจากฐานข้อมูล D1 แล้ว' : 'Pulled latest state from D1'
         );
@@ -1093,7 +1234,7 @@ export default function App() {
       />
 
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Top Bar Contract: Breadcrumb on left, 1 Primary CTA on right */}
+        {/* Top Bar Contract: Breadcrumb on left */}
         <header className="h-16 px-4 sm:px-8 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-6 sticky top-0 z-30 shrink-0 no-print">
           <div className="flex items-center gap-3 min-w-0">
             <button
@@ -1115,15 +1256,6 @@ export default function App() {
               </h1>
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={() => setDarModalState({ isOpen: true, darType: 'New Issue' })}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white hover:bg-slate-800 dark:hover:bg-blue-500 transition-colors whitespace-nowrap shrink-0"
-          >
-            <FilePlus2 className="w-4 h-4" />
-            <span>{t(lang, 'newDarButton')}</span>
-          </button>
         </header>
 
         {/* Main Workspace Content */}
@@ -1134,6 +1266,7 @@ export default function App() {
               documents={documents}
               dars={dars}
               departments={departments}
+              docTypes={docCodeConfig.docTypes}
               auditEvents={auditEvents}
               todayStr={TODAY_STR}
               kpiTargets={kpiTargets}
@@ -1169,6 +1302,7 @@ export default function App() {
               lang={lang}
               documents={documents}
               departments={departments}
+              docTypes={docCodeConfig.docTypes}
               globalSearch={globalSearch}
               onGlobalSearchChange={setGlobalSearch}
               onOpenDocument={(id) => setSelectedDocId(id)}
@@ -1212,12 +1346,16 @@ export default function App() {
             <SettingsView
               lang={lang}
               departments={departments}
+              docCodeConfig={docCodeConfig}
               roles={roles}
               users={users}
               currentUser={currentUser}
               dbInfo={dbInfo}
               dbBusy={dbBusy}
               onAddDepartment={handleAddDepartment}
+              onUpdateDepartment={handleUpdateDepartment}
+              onDeleteDepartment={handleDeleteDepartment}
+              onUpdateDocCodeConfig={handleUpdateDocCodeConfig}
               onAddRole={handleAddRole}
               onUpdateRole={handleUpdateRole}
               onDeleteRole={handleDeleteRole}
@@ -1260,6 +1398,7 @@ export default function App() {
         }}
         documents={documents}
         departments={departments}
+        docCodeConfig={docCodeConfig}
         currentUser={currentUser}
         onClose={() => setDarModalState({ isOpen: false, darType: 'New Issue' })}
         onSubmitDar={handleSubmitDar}

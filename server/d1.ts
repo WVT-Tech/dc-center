@@ -8,6 +8,7 @@ import type {
   DbConnectionInfo,
   DepartmentInfo,
   DepartmentKpiFishbone,
+  DocCodeConfig,
   DocumentActionRequest,
   KpiTargets,
   RoleDefinition,
@@ -23,6 +24,7 @@ export interface DccPersistedPayload {
   users: UserProfile[];
   roles?: RoleDefinition[];
   kpiTargets: KpiTargets;
+  docCodeConfig?: DocCodeConfig;
 }
 
 type SqlParam = string | number | null;
@@ -129,7 +131,8 @@ const SCHEMA_STATEMENTS: string[] = [
     direction TEXT NOT NULL,
     owner_name TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    factors_json TEXT NOT NULL
+    factors_json TEXT NOT NULL,
+    report_json TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS dcc_audit_events (
     id TEXT PRIMARY KEY,
@@ -271,11 +274,19 @@ export class D1DatabaseClient {
     for (const stmt of SCHEMA_STATEMENTS) {
       await this.query(stmt);
     }
-    // Safe migration for pre-existing dcc_users tables missing role_id
+    // Safe migration for pre-existing tables
     try {
       const cols = await this.query<{ name: string }>('PRAGMA table_info(dcc_users)');
       if (!cols.some((c) => c.name === 'role_id')) {
         await this.query('ALTER TABLE dcc_users ADD COLUMN role_id TEXT');
+      }
+    } catch {
+      // Ignore if already migrated
+    }
+    try {
+      const fbCols = await this.query<{ name: string }>('PRAGMA table_info(dcc_fishbones)');
+      if (!fbCols.some((c) => c.name === 'report_json')) {
+        await this.query('ALTER TABLE dcc_fishbones ADD COLUMN report_json TEXT');
       }
     } catch {
       // Ignore if already migrated
@@ -296,8 +307,8 @@ export class D1DatabaseClient {
         this.query<Record<string, unknown>>('SELECT * FROM dcc_fishbones ORDER BY department ASC'),
         this.query<Record<string, unknown>>('SELECT * FROM dcc_audit_events ORDER BY timestamp DESC'),
         this.query<Record<string, unknown>>(
-          'SELECT key, value_json FROM dcc_settings WHERE key = ?',
-          ['kpi_targets']
+          'SELECT key, value_json FROM dcc_settings WHERE key IN (?, ?)',
+          ['kpi_targets', 'doc_code_config']
         ),
       ]);
 
@@ -393,20 +404,32 @@ export class D1DatabaseClient {
       logs: safeJsonParse(r.logs_json, []),
     }));
 
-    const fishbones: DepartmentKpiFishbone[] = fishboneRows.map((r) => ({
-      id: String(r.id),
-      department: String(r.department),
-      period: String(r.period),
-      mainKpiTitleTh: String(r.main_kpi_title_th),
-      mainKpiTitleEn: String(r.main_kpi_title_en),
-      targetValue: Number(r.target_value),
-      actualValue: Number(r.actual_value),
-      unit: String(r.unit),
-      direction: String(r.direction) as DepartmentKpiFishbone['direction'],
-      ownerName: String(r.owner_name),
-      updatedAt: String(r.updated_at),
-      factors: safeJsonParse(r.factors_json, []),
-    }));
+    const fishbones: DepartmentKpiFishbone[] = fishboneRows.map((r) => {
+      const reportMeta = r.report_json
+        ? safeJsonParse<Partial<DepartmentKpiFishbone>>(r.report_json, {})
+        : {};
+      return {
+        id: String(r.id),
+        department: String(r.department),
+        period: String(r.period),
+        mainKpiTitleTh: String(r.main_kpi_title_th),
+        mainKpiTitleEn: String(r.main_kpi_title_en),
+        targetValue: Number(r.target_value),
+        actualValue: Number(r.actual_value),
+        unit: String(r.unit),
+        direction: String(r.direction) as DepartmentKpiFishbone['direction'],
+        ownerName: String(r.owner_name),
+        updatedAt: String(r.updated_at),
+        factors: safeJsonParse(r.factors_json, []),
+        kpiCode: reportMeta.kpiCode,
+        monthLabel: reportMeta.monthLabel,
+        yearLabel: reportMeta.yearLabel,
+        prevYearAvg: reportMeta.prevYearAvg,
+        monthlyActuals: reportMeta.monthlyActuals,
+        immediateActions: reportMeta.immediateActions,
+        preventiveActions: reportMeta.preventiveActions,
+      };
+    });
 
     const auditEvents: AuditEvent[] = auditRows.map((r) => ({
       id: String(r.id),
@@ -419,20 +442,26 @@ export class D1DatabaseClient {
       detailEn: String(r.detail_en),
     }));
 
-    const kpiTargets: KpiTargets =
-      settingRows.length > 0
-        ? safeJsonParse(settingRows[0].value_json, {
-            onTimeReviewPct: 95,
-            ackRatePct: 90,
-            firstPassPct: 85,
-            darSlaDays: 5,
-          })
-        : {
-            onTimeReviewPct: 95,
-            ackRatePct: 90,
-            firstPassPct: 85,
-            darSlaDays: 5,
-          };
+    const kpiRow = settingRows.find((r) => String(r.key) === 'kpi_targets');
+    const docCfgRow = settingRows.find((r) => String(r.key) === 'doc_code_config');
+
+    const kpiTargets: KpiTargets = kpiRow
+      ? safeJsonParse(kpiRow.value_json, {
+          onTimeReviewPct: 95,
+          ackRatePct: 90,
+          firstPassPct: 85,
+          darSlaDays: 5,
+        })
+      : {
+          onTimeReviewPct: 95,
+          ackRatePct: 90,
+          firstPassPct: 85,
+          darSlaDays: 5,
+        };
+
+    const docCodeConfig = docCfgRow
+      ? safeJsonParse<DocCodeConfig | undefined>(docCfgRow.value_json, undefined)
+      : undefined;
 
     const payload: DccPersistedPayload = {
       documents,
@@ -443,6 +472,7 @@ export class D1DatabaseClient {
       users,
       roles,
       kpiTargets,
+      ...(docCodeConfig ? { docCodeConfig } : {}),
     };
 
     this.primeCache(payload);
@@ -466,6 +496,9 @@ export class D1DatabaseClient {
     cacheTable('dcc_audit_events', payload.auditEvents, (a) => a.id);
     const settingsMap = new Map<string, string>();
     settingsMap.set('kpi_targets', hashValue(payload.kpiTargets));
+    if (payload.docCodeConfig) {
+      settingsMap.set('doc_code_config', hashValue(payload.docCodeConfig));
+    }
     this.rowHashCache.set('dcc_settings', settingsMap);
   }
 
@@ -634,10 +667,19 @@ export class D1DatabaseClient {
 
     const fishbonesToSync = getChanged('dcc_fishbones', payload.fishbones, (f) => f.id);
     await this.runChunked(fishbonesToSync, async (fb) => {
+      const reportJson = JSON.stringify({
+        kpiCode: fb.kpiCode,
+        monthLabel: fb.monthLabel,
+        yearLabel: fb.yearLabel,
+        prevYearAvg: fb.prevYearAvg,
+        monthlyActuals: fb.monthlyActuals,
+        immediateActions: fb.immediateActions,
+        preventiveActions: fb.preventiveActions,
+      });
       await this.query(
         `INSERT OR REPLACE INTO dcc_fishbones
-         (id, department, period, main_kpi_title_th, main_kpi_title_en, target_value, actual_value, unit, direction, owner_name, updated_at, factors_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, department, period, main_kpi_title_th, main_kpi_title_en, target_value, actual_value, unit, direction, owner_name, updated_at, factors_json, report_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           fb.id,
           fb.department,
@@ -651,6 +693,7 @@ export class D1DatabaseClient {
           fb.ownerName,
           fb.updatedAt,
           JSON.stringify(fb.factors),
+          reportJson,
         ]
       );
     });
@@ -681,6 +724,17 @@ export class D1DatabaseClient {
          VALUES (?, ?, ?)`,
         ['kpi_targets', JSON.stringify(payload.kpiTargets), nowIso]
       );
+    }
+
+    if (payload.docCodeConfig) {
+      const prevDocCfgHash = this.rowHashCache.get('dcc_settings')?.get('doc_code_config');
+      if (prevDocCfgHash !== hashValue(payload.docCodeConfig)) {
+        await this.query(
+          `INSERT OR REPLACE INTO dcc_settings (key, value_json, updated_at)
+           VALUES (?, ?, ?)`,
+          ['doc_code_config', JSON.stringify(payload.docCodeConfig), nowIso]
+        );
+      }
     }
 
     this.primeCache(payload);

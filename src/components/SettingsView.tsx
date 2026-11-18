@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Check,
   Database,
   Download,
+  FileCode2,
   Pencil,
   Plus,
   RefreshCw,
@@ -17,22 +19,29 @@ import {
   DarPermission,
   DbConnectionInfo,
   DepartmentInfo,
+  DocCodeConfig,
+  DocTypeDefinition,
   Language,
   RoleDefinition,
   UserProfile,
 } from '../types/dcc';
 import { t } from '../i18n/translations';
+import { formatDocNumber } from '../utils/docCode';
 import { Avatar } from './Avatar';
 
 interface SettingsViewProps {
   lang: Language;
   departments: DepartmentInfo[];
+  docCodeConfig: DocCodeConfig;
   roles: RoleDefinition[];
   users: UserProfile[];
   currentUser: UserProfile;
   dbInfo: DbConnectionInfo | null;
   dbBusy: boolean;
   onAddDepartment: (dept: DepartmentInfo) => void;
+  onUpdateDepartment: (originalCode: string, dept: DepartmentInfo) => void;
+  onDeleteDepartment: (deptCode: string) => void;
+  onUpdateDocCodeConfig: (config: DocCodeConfig) => void;
   onAddRole: (role: RoleDefinition) => void;
   onUpdateRole: (role: RoleDefinition) => void;
   onDeleteRole: (roleId: string) => void;
@@ -45,6 +54,14 @@ interface SettingsViewProps {
   onPullDatabase: () => void;
 }
 
+const PATTERN_PRESETS = [
+  '{TYPE}-{DEPT}-{SEQ}',
+  '{DEPT}-{TYPE}-{SEQ}',
+  '{PREFIX}-{TYPE}-{DEPT}-{SEQ}',
+  '{TYPE}-{DEPT}-{YEAR}-{SEQ}',
+  '{TYPE}/{DEPT}/{SEQ}',
+];
+
 const DAR_PERMISSION_LABELS: Record<DarPermission, { th: string; en: string }> = {
   none: { th: 'อ่านและยื่นคำขอเท่านั้น', en: 'Read & Submit DAR Only' },
   review: { th: 'ทบทวนคำขอ DAR ประจำแผนก', en: 'Dept Reviewer (Stage 1)' },
@@ -55,12 +72,16 @@ const DAR_PERMISSION_LABELS: Record<DarPermission, { th: string; en: string }> =
 export const SettingsView: React.FC<SettingsViewProps> = ({
   lang,
   departments,
+  docCodeConfig,
   roles,
   users,
   currentUser,
   dbInfo,
   dbBusy,
   onAddDepartment,
+  onUpdateDepartment,
+  onDeleteDepartment,
+  onUpdateDocCodeConfig,
   onAddRole,
   onUpdateRole,
   onDeleteRole,
@@ -75,11 +96,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const isAdmin =
     Boolean(currentUser.isAdmin) || currentUser.username.toLowerCase() === 'dcc';
 
-  // Department form
+  // Department form & edit state
   const [code, setCode] = useState('');
   const [nameTh, setNameTh] = useState('');
   const [nameEn, setNameEn] = useState('');
   const [headName, setHeadName] = useState('');
+  const [deptFormError, setDeptFormError] = useState<string | null>(null);
+  const [editingDeptOriginalCode, setEditingDeptOriginalCode] = useState<string | null>(null);
+  const [editDeptCode, setEditDeptCode] = useState('');
+  const [editDeptNameTh, setEditDeptNameTh] = useState('');
+  const [editDeptNameEn, setEditDeptNameEn] = useState('');
+  const [editDeptHeadName, setEditDeptHeadName] = useState('');
+  const [editDeptError, setEditDeptError] = useState<string | null>(null);
+
+  // Document Code Schema & Doc Types state
+  const [schemaPattern, setSchemaPattern] = useState(docCodeConfig.pattern);
+  const [schemaPrefix, setSchemaPrefix] = useState(docCodeConfig.prefix);
+  const [schemaSeqDigits, setSchemaSeqDigits] = useState(docCodeConfig.seqDigits);
+  const [newDocTypeCode, setNewDocTypeCode] = useState('');
+  const [newDocTypeTh, setNewDocTypeTh] = useState('');
+  const [newDocTypeEn, setNewDocTypeEn] = useState('');
+  const [docTypeError, setDocTypeError] = useState<string | null>(null);
+  const [editingDocTypeOrigCode, setEditingDocTypeOrigCode] = useState<string | null>(null);
+  const [editDocTypeCode, setEditDocTypeCode] = useState('');
+  const [editDocTypeTh, setEditDocTypeTh] = useState('');
+  const [editDocTypeEn, setEditDocTypeEn] = useState('');
+  const [editDocTypeError, setEditDocTypeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSchemaPattern(docCodeConfig.pattern);
+    setSchemaPrefix(docCodeConfig.prefix);
+    setSchemaSeqDigits(docCodeConfig.seqDigits);
+  }, [docCodeConfig.pattern, docCodeConfig.prefix, docCodeConfig.seqDigits]);
 
   // Role Create/Edit form
   const [newRoleName, setNewRoleName] = useState('');
@@ -141,19 +189,156 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleSubmitDept = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanCode = code.trim().toUpperCase();
-    if (!cleanCode || !nameTh.trim() || !nameEn.trim()) return;
-    if (departments.some((d) => d.code === cleanCode)) return;
+    const cleanCode = code.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    if (!cleanCode || !nameTh.trim()) return;
+    if (departments.some((d) => d.code === cleanCode)) {
+      setDeptFormError(
+        lang === 'th'
+          ? `รหัสหน่วยงาน ${cleanCode} มีอยู่ในระบบแล้ว`
+          : `Department code ${cleanCode} already exists`
+      );
+      return;
+    }
+    setDeptFormError(null);
     onAddDepartment({
       code: cleanCode,
       nameTh: nameTh.trim(),
-      nameEn: nameEn.trim(),
+      nameEn: nameEn.trim() || nameTh.trim(),
       headName: headName.trim() || currentUser.nameTh,
     });
     setCode('');
     setNameTh('');
     setNameEn('');
     setHeadName('');
+  };
+
+  const openEditDepartment = (dept: DepartmentInfo) => {
+    setEditingDeptOriginalCode(dept.code);
+    setEditDeptCode(dept.code);
+    setEditDeptNameTh(dept.nameTh);
+    setEditDeptNameEn(dept.nameEn);
+    setEditDeptHeadName(dept.headName);
+    setEditDeptError(null);
+  };
+
+  const handleSaveDepartment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDeptOriginalCode) return;
+    const cleanCode = editDeptCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    if (!cleanCode || !editDeptNameTh.trim()) return;
+    if (
+      cleanCode !== editingDeptOriginalCode &&
+      departments.some((d) => d.code === cleanCode)
+    ) {
+      setEditDeptError(
+        lang === 'th'
+          ? `รหัสหน่วยงาน ${cleanCode} มีอยู่ในระบบแล้ว`
+          : `Department code ${cleanCode} already exists`
+      );
+      return;
+    }
+    onUpdateDepartment(editingDeptOriginalCode, {
+      code: cleanCode,
+      nameTh: editDeptNameTh.trim(),
+      nameEn: editDeptNameEn.trim() || editDeptNameTh.trim(),
+      headName: editDeptHeadName.trim() || currentUser.nameTh,
+    });
+    setEditingDeptOriginalCode(null);
+  };
+
+  const handleSaveDocPattern = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanPattern = schemaPattern.trim() || '{TYPE}-{DEPT}-{SEQ}';
+    onUpdateDocCodeConfig({
+      ...docCodeConfig,
+      pattern: cleanPattern,
+      prefix: schemaPrefix.trim().toUpperCase(),
+      seqDigits: Math.min(6, Math.max(2, Number(schemaSeqDigits) || 3)),
+    });
+  };
+
+  const handleAddDocType = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCode = newDocTypeCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    if (!cleanCode || !newDocTypeTh.trim()) return;
+    if (docCodeConfig.docTypes.some((dt) => dt.code === cleanCode)) {
+      setDocTypeError(
+        lang === 'th'
+          ? `รหัสประเภทเอกสาร ${cleanCode} มีอยู่ในระบบแล้ว`
+          : `Document type ${cleanCode} already exists`
+      );
+      return;
+    }
+    setDocTypeError(null);
+    onUpdateDocCodeConfig({
+      ...docCodeConfig,
+      docTypes: [
+        ...docCodeConfig.docTypes,
+        {
+          code: cleanCode,
+          nameTh: newDocTypeTh.trim(),
+          nameEn: newDocTypeEn.trim() || newDocTypeTh.trim(),
+        },
+      ],
+    });
+    setNewDocTypeCode('');
+    setNewDocTypeTh('');
+    setNewDocTypeEn('');
+  };
+
+  const openEditDocType = (dt: DocTypeDefinition) => {
+    setEditingDocTypeOrigCode(dt.code);
+    setEditDocTypeCode(dt.code);
+    setEditDocTypeTh(dt.nameTh);
+    setEditDocTypeEn(dt.nameEn);
+    setEditDocTypeError(null);
+  };
+
+  const handleSaveDocType = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDocTypeOrigCode) return;
+    const cleanCode = editDocTypeCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    if (!cleanCode || !editDocTypeTh.trim()) return;
+    if (
+      cleanCode !== editingDocTypeOrigCode &&
+      docCodeConfig.docTypes.some((dt) => dt.code === cleanCode)
+    ) {
+      setEditDocTypeError(
+        lang === 'th'
+          ? `รหัสประเภทเอกสาร ${cleanCode} มีอยู่ในระบบแล้ว`
+          : `Document type ${cleanCode} already exists`
+      );
+      return;
+    }
+    onUpdateDocCodeConfig({
+      ...docCodeConfig,
+      docTypes: docCodeConfig.docTypes.map((dt) =>
+        dt.code === editingDocTypeOrigCode
+          ? {
+              code: cleanCode,
+              nameTh: editDocTypeTh.trim(),
+              nameEn: editDocTypeEn.trim() || editDocTypeTh.trim(),
+            }
+          : dt
+      ),
+    });
+    setEditingDocTypeOrigCode(null);
+  };
+
+  const handleDeleteDocType = (targetCode: string) => {
+    if (docCodeConfig.docTypes.length <= 1) {
+      setDocTypeError(
+        lang === 'th'
+          ? 'ต้องมีประเภทเอกสารอย่างน้อย 1 ประเภท'
+          : 'At least one document type must remain'
+      );
+      return;
+    }
+    setDocTypeError(null);
+    onUpdateDocCodeConfig({
+      ...docCodeConfig,
+      docTypes: docCodeConfig.docTypes.filter((dt) => dt.code !== targetCode),
+    });
   };
 
   const handleSubmitRole = (e: React.FormEvent) => {
@@ -295,17 +480,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setEditingUser(null);
   };
 
+  const previewPatternConfig: DocCodeConfig = {
+    ...docCodeConfig,
+    pattern: schemaPattern.trim() || '{TYPE}-{DEPT}-{SEQ}',
+    prefix: schemaPrefix.trim().toUpperCase(),
+    seqDigits: Math.min(6, Math.max(2, Number(schemaSeqDigits) || 3)),
+  };
+  const previewSampleCode = formatDocNumber(
+    previewPatternConfig,
+    docCodeConfig.docTypes[0]?.code ?? 'WI',
+    departments[0]?.code ?? 'QA',
+    1
+  );
+
   return (
     <div className="space-y-6">
-      {/* Department Prefix Directory & Add Form */}
+      {/* Department Prefix Directory & Add/Edit/Delete */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
         <section className="xl:col-span-7 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
               {lang === 'th'
-                ? 'รหัสหน่วยงานและโครงสร้างรหัสเอกสาร ({TYPE}-{DEPT}-{SEQ})'
-                : 'Department Codes & Document Numbering Schema ({TYPE}-{DEPT}-{SEQ})'}
+                ? `รหัสหน่วยงานและโครงสร้างรหัสเอกสาร (${docCodeConfig.pattern})`
+                : `Department Codes & Document Numbering Schema (${docCodeConfig.pattern})`}
             </h2>
+            <span className="font-mono text-xs text-slate-500 dark:text-slate-400">
+              {departments.length} {lang === 'th' ? 'หน่วยงาน' : 'depts'}
+            </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -315,23 +516,54 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <th className="py-2.5 px-4">
                     {lang === 'th' ? 'ชื่อหน่วยงาน' : 'Department Name'}
                   </th>
-                  <th className="py-2.5 px-5">
+                  <th className="py-2.5 px-4">
                     {lang === 'th' ? 'ผู้จัดการฝ่าย' : 'Department Head'}
                   </th>
+                  {isAdmin && (
+                    <th className="py-2.5 px-5 text-right">{t(lang, 'colActions')}</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
                 {departments.map((dept) => (
-                  <tr key={dept.code}>
-                    <td className="py-3 px-5 font-mono font-semibold text-blue-600 dark:text-blue-400">
+                  <tr
+                    key={dept.code}
+                    className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30"
+                  >
+                    <td className="py-3 px-5 font-mono font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap">
                       {dept.code}
                     </td>
                     <td className="py-3 px-4 text-slate-900 dark:text-slate-100 font-medium">
-                      {lang === 'th' ? dept.nameTh : dept.nameEn}
+                      <div>{lang === 'th' ? dept.nameTh : dept.nameEn}</div>
+                      <div className="text-[11px] text-slate-400 dark:text-slate-500 font-normal">
+                        {lang === 'th' ? dept.nameEn : dept.nameTh}
+                      </div>
                     </td>
-                    <td className="py-3 px-5 text-slate-600 dark:text-slate-300">
+                    <td className="py-3 px-4 text-slate-600 dark:text-slate-300">
                       {dept.headName}
                     </td>
+                    {isAdmin && (
+                      <td className="py-3 px-5 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openEditDepartment(dept)}
+                            className="p-1.5 rounded-md text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                            title={lang === 'th' ? 'แก้ไขหน่วยงาน' : 'Edit Department'}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteDepartment(dept.code)}
+                            className="p-1.5 rounded-md text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                            title={lang === 'th' ? 'ลบหน่วยงาน' : 'Delete Department'}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -343,69 +575,318 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
             {lang === 'th' ? 'เพิ่มรหัสหน่วยงานใหม่' : 'Register New Department Code'}
           </h3>
-          <form onSubmit={handleSubmitDept} className="space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                {lang === 'th' ? 'รหัสย่อ (2-3 ตัวอักษร เช่น RD)' : 'Code (2-3 letters, e.g. RD)'}
-              </label>
-              <input
-                type="text"
-                maxLength={4}
-                required
-                value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
-                placeholder="RD"
-                className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                {lang === 'th' ? 'ชื่อหน่วยงาน (ภาษาไทย)' : 'Department Name (TH)'}
-              </label>
-              <input
-                type="text"
-                required
-                value={nameTh}
-                onChange={(e) => setNameTh(e.target.value)}
-                placeholder="วิจัยและพัฒนา"
-                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                {lang === 'th' ? 'ชื่อหน่วยงาน (ภาษาอังกฤษ)' : 'Department Name (EN)'}
-              </label>
-              <input
-                type="text"
-                required
-                value={nameEn}
-                onChange={(e) => setNameEn(e.target.value)}
-                placeholder="Research & Development"
-                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                {lang === 'th' ? 'หัวหน้าหน่วยงาน' : 'Department Head'}
-              </label>
-              <input
-                type="text"
-                value={headName}
-                onChange={(e) => setHeadName(e.target.value)}
-                placeholder="ดร.นภัสสร อรุณ"
-                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
-            <button
-              type="submit"
-              className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white hover:bg-slate-800 dark:hover:bg-blue-500 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              <span>{lang === 'th' ? 'เพิ่มหน่วยงาน' : 'Add Department'}</span>
-            </button>
-          </form>
+          {isAdmin ? (
+            <form onSubmit={handleSubmitDept} className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'รหัสย่อ (2-6 ตัวอักษร เช่น RD)' : 'Code (2-6 chars, e.g. RD)'}
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  required
+                  value={code}
+                  onChange={(e) => {
+                    setCode(e.target.value.toUpperCase());
+                    if (deptFormError) setDeptFormError(null);
+                  }}
+                  placeholder="RD"
+                  className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'ชื่อหน่วยงาน (ภาษาไทย) *' : 'Department Name (TH) *'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={nameTh}
+                  onChange={(e) => setNameTh(e.target.value)}
+                  placeholder="วิจัยและพัฒนา"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'ชื่อหน่วยงาน (ภาษาอังกฤษ)' : 'Department Name (EN)'}
+                </label>
+                <input
+                  type="text"
+                  value={nameEn}
+                  onChange={(e) => setNameEn(e.target.value)}
+                  placeholder="Research & Development"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'หัวหน้าหน่วยงาน / ผู้จัดการฝ่าย' : 'Department Head'}
+                </label>
+                <input
+                  type="text"
+                  value={headName}
+                  onChange={(e) => setHeadName(e.target.value)}
+                  placeholder="ดร.นภัสสร อรุณ"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+              {deptFormError && (
+                <p className="text-xs text-rose-600 dark:text-rose-400">{deptFormError}</p>
+              )}
+              <button
+                type="submit"
+                className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white hover:bg-slate-800 dark:hover:bg-blue-500 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{lang === 'th' ? 'เพิ่มหน่วยงาน' : 'Add Department'}</span>
+              </button>
+            </form>
+          ) : (
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {lang === 'th'
+                ? 'เฉพาะผู้ดูแลระบบ (dcc) เท่านั้นที่สามารถเพิ่ม แก้ไข หรือลบรหัสหน่วยงานได้'
+                : 'Only system administrator (dcc) can add, edit, or delete department codes.'}
+            </p>
+          )}
         </section>
       </div>
+
+      {/* Document Numbering Structure & Document Types CRUD */}
+      {isAdmin && (
+        <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <FileCode2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                  {lang === 'th'
+                    ? 'ตั้งค่าโครงสร้างรหัสเอกสารและประเภทเอกสาร'
+                    : 'Document Numbering Structure & Document Type Codes'}
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {lang === 'th'
+                    ? 'กำหนดรูปแบบรหัสเอกสารอัตโนมัติเมื่อสร้าง DAR และเพิ่ม/แก้ไข/ลบรหัสประเภทเอกสาร (เช่น QM, QP, WI, FM)'
+                    : 'Configure automatic DAR document numbering patterns and manage document type prefixes'}
+                </p>
+              </div>
+            </div>
+            <div className="text-xs font-mono px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900">
+              {lang === 'th' ? 'ตัวอย่าง:' : 'Preview:'} {previewSampleCode}
+            </div>
+          </div>
+
+          <div className="p-6 border-b border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/30 space-y-4">
+            <form
+              onSubmit={handleSaveDocPattern}
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end"
+            >
+              <div className="lg:col-span-5">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th'
+                    ? 'โครงสร้างรูปแบบรหัสเอกสาร (Tokens: {PREFIX}, {TYPE}, {DEPT}, {YEAR}, {SEQ})'
+                    : 'Pattern Format (Tokens: {PREFIX}, {TYPE}, {DEPT}, {YEAR}, {SEQ})'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={schemaPattern}
+                  onChange={(e) => setSchemaPattern(e.target.value)}
+                  placeholder="{TYPE}-{DEPT}-{SEQ}"
+                  className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                />
+              </div>
+              <div className="lg:col-span-3">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'รหัสบริษัทนำหน้า ({PREFIX} ถ้ามี)' : 'Company Prefix ({PREFIX})'}
+                </label>
+                <input
+                  type="text"
+                  maxLength={8}
+                  value={schemaPrefix}
+                  onChange={(e) => setSchemaPrefix(e.target.value.toUpperCase())}
+                  placeholder="JT"
+                  className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                />
+              </div>
+              <div className="lg:col-span-2">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'จำนวนหลัก {SEQ}' : 'Seq Digits'}
+                </label>
+                <select
+                  value={schemaSeqDigits}
+                  onChange={(e) => setSchemaSeqDigits(Number(e.target.value))}
+                  className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                >
+                  {[2, 3, 4, 5].map((n) => (
+                    <option key={n} value={n}>
+                      {n} ({'0'.repeat(Math.max(1, n - 1))}1)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="lg:col-span-2">
+                <button
+                  type="submit"
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white hover:bg-slate-800 dark:hover:bg-blue-500 transition-colors"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{lang === 'th' ? 'บันทึกรูปแบบ' : 'Save Schema'}</span>
+                </button>
+              </div>
+            </form>
+
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span className="text-slate-500 dark:text-slate-400 mr-1">
+                {lang === 'th' ? 'รูปแบบแนะนำ:' : 'Presets:'}
+              </span>
+              {PATTERN_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setSchemaPattern(preset)}
+                  className={`px-2 py-1 rounded border font-mono transition-colors ${
+                    schemaPattern === preset
+                      ? 'bg-blue-50 dark:bg-blue-950/50 border-blue-300 dark:border-blue-800 text-blue-700 dark:text-blue-300'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Add Document Type Code */}
+          <div className="p-6 border-b border-slate-200 dark:border-slate-800">
+            <form
+              onSubmit={handleAddDocType}
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end"
+            >
+              <div className="lg:col-span-2">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'รหัสประเภท *' : 'Type Code *'}
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  required
+                  value={newDocTypeCode}
+                  onChange={(e) => {
+                    setNewDocTypeCode(e.target.value.toUpperCase());
+                    if (docTypeError) setDocTypeError(null);
+                  }}
+                  placeholder="SOP"
+                  className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div className="lg:col-span-4">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'ชื่อประเภทเอกสาร (ภาษาไทย) *' : 'Type Name (TH) *'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newDocTypeTh}
+                  onChange={(e) => setNewDocTypeTh(e.target.value)}
+                  placeholder="มาตรฐานการปฏิบัติงาน"
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div className="lg:col-span-4">
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'ชื่อประเภทเอกสาร (ภาษาอังกฤษ)' : 'Type Name (EN)'}
+                </label>
+                <input
+                  type="text"
+                  value={newDocTypeEn}
+                  onChange={(e) => setNewDocTypeEn(e.target.value)}
+                  placeholder="Standard Operating Procedure"
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div className="lg:col-span-2">
+                <button
+                  type="submit"
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white hover:bg-slate-800 dark:hover:bg-blue-500 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{lang === 'th' ? 'เพิ่มประเภท' : 'Add Type'}</span>
+                </button>
+              </div>
+            </form>
+            {docTypeError && (
+              <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{docTypeError}</p>
+            )}
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/50 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  <th className="py-2.5 px-5">Code</th>
+                  <th className="py-2.5 px-4">
+                    {lang === 'th' ? 'ชื่อประเภทเอกสาร (TH)' : 'Document Type (TH)'}
+                  </th>
+                  <th className="py-2.5 px-4">
+                    {lang === 'th' ? 'ชื่อประเภทเอกสาร (EN)' : 'Document Type (EN)'}
+                  </th>
+                  <th className="py-2.5 px-4">
+                    {lang === 'th' ? 'ตัวอย่างรหัส' : 'Sample Code'}
+                  </th>
+                  <th className="py-2.5 px-5 text-right">{t(lang, 'colActions')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {docCodeConfig.docTypes.map((dt) => (
+                  <tr
+                    key={dt.code}
+                    className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30"
+                  >
+                    <td className="py-3 px-5 font-mono font-semibold text-blue-600 dark:text-blue-400">
+                      {dt.code}
+                    </td>
+                    <td className="py-3 px-4 font-medium text-slate-900 dark:text-slate-100">
+                      {dt.nameTh}
+                    </td>
+                    <td className="py-3 px-4 text-slate-600 dark:text-slate-300">
+                      {dt.nameEn}
+                    </td>
+                    <td className="py-3 px-4 font-mono text-slate-500 dark:text-slate-400">
+                      {formatDocNumber(
+                        docCodeConfig,
+                        dt.code,
+                        departments[0]?.code ?? 'QA',
+                        1
+                      )}
+                    </td>
+                    <td className="py-3 px-5 text-right whitespace-nowrap">
+                      <div className="inline-flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openEditDocType(dt)}
+                          className="p-1.5 rounded-md text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          title={lang === 'th' ? 'แก้ไขประเภทเอกสาร' : 'Edit Document Type'}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteDocType(dt.code)}
+                          className="p-1.5 rounded-md text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          title={lang === 'th' ? 'ลบประเภทเอกสาร' : 'Delete Document Type'}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* Admin Only: Role Management Grouped by Department */}
       {isAdmin && (
@@ -1203,6 +1684,192 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   className="px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white"
                 >
                   {lang === 'th' ? 'บันทึก Role' : 'Save Role'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Department */}
+      {editingDeptOriginalCode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-slate-950/60"
+            onClick={() => setEditingDeptOriginalCode(null)}
+          />
+          <div className="relative z-10 w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                {lang === 'th'
+                  ? `แก้ไขรหัสหน่วยงาน (${editingDeptOriginalCode})`
+                  : `Edit Department (${editingDeptOriginalCode})`}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingDeptOriginalCode(null)}
+                className="p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveDepartment} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'รหัสหน่วยงาน (Code) *' : 'Department Code *'}
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  required
+                  value={editDeptCode}
+                  onChange={(e) => {
+                    setEditDeptCode(e.target.value.toUpperCase());
+                    if (editDeptError) setEditDeptError(null);
+                  }}
+                  className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+                <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                  {lang === 'th'
+                    ? 'หากเปลี่ยนรหัส ระบบจะอัปเดตรหัสหน่วยงานในผู้ใช้ เอกสาร และ Role ที่เชื่อมโยงให้อัตโนมัติ'
+                    : 'Renaming code updates linked users, roles, documents, and KPI records.'}
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'ชื่อหน่วยงาน (ภาษาไทย) *' : 'Department Name (TH) *'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editDeptNameTh}
+                  onChange={(e) => setEditDeptNameTh(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'ชื่อหน่วยงาน (ภาษาอังกฤษ)' : 'Department Name (EN)'}
+                </label>
+                <input
+                  type="text"
+                  value={editDeptNameEn}
+                  onChange={(e) => setEditDeptNameEn(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'ผู้จัดการฝ่าย / หัวหน้าหน่วยงาน' : 'Department Head'}
+                </label>
+                <input
+                  type="text"
+                  value={editDeptHeadName}
+                  onChange={(e) => setEditDeptHeadName(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              {editDeptError && (
+                <p className="text-xs text-rose-600 dark:text-rose-400">{editDeptError}</p>
+              )}
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingDeptOriginalCode(null)}
+                  className="px-4 py-2 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700"
+                >
+                  {t(lang, 'cancelBtn')}
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white"
+                >
+                  {lang === 'th' ? 'บันทึกการแก้ไข' : 'Save Department'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Document Type */}
+      {editingDocTypeOrigCode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-slate-950/60"
+            onClick={() => setEditingDocTypeOrigCode(null)}
+          />
+          <div className="relative z-10 w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                {lang === 'th'
+                  ? `แก้ไขประเภทเอกสาร (${editingDocTypeOrigCode})`
+                  : `Edit Document Type (${editingDocTypeOrigCode})`}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingDocTypeOrigCode(null)}
+                className="p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveDocType} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'รหัสประเภท (Code) *' : 'Type Code *'}
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  required
+                  value={editDocTypeCode}
+                  onChange={(e) => {
+                    setEditDocTypeCode(e.target.value.toUpperCase());
+                    if (editDocTypeError) setEditDocTypeError(null);
+                  }}
+                  className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'ชื่อประเภทเอกสาร (ภาษาไทย) *' : 'Type Name (TH) *'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editDocTypeTh}
+                  onChange={(e) => setEditDocTypeTh(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'ชื่อประเภทเอกสาร (ภาษาอังกฤษ)' : 'Type Name (EN)'}
+                </label>
+                <input
+                  type="text"
+                  value={editDocTypeEn}
+                  onChange={(e) => setEditDocTypeEn(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              {editDocTypeError && (
+                <p className="text-xs text-rose-600 dark:text-rose-400">{editDocTypeError}</p>
+              )}
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingDocTypeOrigCode(null)}
+                  className="px-4 py-2 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700"
+                >
+                  {t(lang, 'cancelBtn')}
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white"
+                >
+                  {lang === 'th' ? 'บันทึกประเภทเอกสาร' : 'Save Type'}
                 </button>
               </div>
             </form>

@@ -13,7 +13,7 @@ import {
   AuditEvent,
   ControlledDocument,
   DepartmentInfo,
-  DocType,
+  DocTypeDefinition,
   DocumentActionRequest,
   KpiTargets,
   Language,
@@ -21,6 +21,7 @@ import {
 } from '../types/dcc';
 import { t } from '../i18n/translations';
 import { computeDccKpis } from '../utils/kpiMetrics';
+import { DEFAULT_DOC_TYPES } from '../utils/docCode';
 import { DarStageLabel } from './StatusLabel';
 
 interface OverviewViewProps {
@@ -28,6 +29,7 @@ interface OverviewViewProps {
   documents: ControlledDocument[];
   dars: DocumentActionRequest[];
   departments: DepartmentInfo[];
+  docTypes?: DocTypeDefinition[];
   auditEvents: AuditEvent[];
   todayStr: string;
   kpiTargets: KpiTargets;
@@ -36,20 +38,12 @@ interface OverviewViewProps {
   onOpenDarQueue: () => void;
 }
 
-const DOC_TYPE_INFO: Record<DocType, { th: string; en: string }> = {
-  QM: { th: 'คู่มือคุณภาพ (QM)', en: 'Quality Manual (QM)' },
-  QP: { th: 'ระเบียบปฏิบัติ (QP)', en: 'Quality Procedure (QP)' },
-  WI: { th: 'วิธีปฏิบัติงาน (WI)', en: 'Work Instruction (WI)' },
-  FM: { th: 'แบบฟอร์มบันทึก (FM)', en: 'Quality Form (FM)' },
-  SD: { th: 'เอกสารสนับสนุน (SD)', en: 'Supporting Doc (SD)' },
-  EXT: { th: 'เอกสารภายนอก (EXT)', en: 'External Standard (EXT)' },
-};
-
 export const OverviewView: React.FC<OverviewViewProps> = ({
   lang,
   documents,
   dars,
   departments,
+  docTypes = DEFAULT_DOC_TYPES,
   auditEvents,
   todayStr,
   kpiTargets,
@@ -67,16 +61,12 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   const allRecipientsLength = kpi.totalRecipients;
   const ackRate = kpi.ackRate;
 
-  const typeCounts: Record<DocType, number> = {
-    QM: 0,
-    QP: 0,
-    WI: 0,
-    FM: 0,
-    SD: 0,
-    EXT: 0,
-  };
+  const typeCounts: Record<string, number> = {};
+  docTypes.forEach((dt) => {
+    typeCounts[dt.code] = 0;
+  });
   activeDocs.forEach((doc) => {
-    typeCounts[doc.type] += 1;
+    typeCounts[doc.type] = (typeCounts[doc.type] ?? 0) + 1;
   });
 
   const deptCounts = departments
@@ -360,16 +350,16 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               {t(lang, 'overviewBreakdownTitle')}
             </h2>
             <div className="mt-4 divide-y divide-slate-100 dark:divide-slate-800">
-              {(Object.keys(DOC_TYPE_INFO) as DocType[]).map((type) => (
+              {docTypes.map((dt) => (
                 <div
-                  key={type}
+                  key={dt.code}
                   className="py-2.5 flex items-center justify-between text-xs"
                 >
                   <span className="text-slate-700 dark:text-slate-300 font-medium">
-                    {lang === 'th' ? DOC_TYPE_INFO[type].th : DOC_TYPE_INFO[type].en}
+                    {lang === 'th' ? dt.nameTh : dt.nameEn} ({dt.code})
                   </span>
                   <span className="font-mono tabular-nums font-semibold text-slate-900 dark:text-slate-100">
-                    {typeCounts[type]}
+                    {typeCounts[dt.code] ?? 0}
                   </span>
                 </div>
               ))}

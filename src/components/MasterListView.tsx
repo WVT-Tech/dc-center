@@ -11,15 +11,18 @@ import {
   DepartmentInfo,
   DocStatus,
   DocType,
+  DocTypeDefinition,
   Language,
 } from '../types/dcc';
 import { t } from '../i18n/translations';
+import { DEFAULT_DOC_TYPES } from '../utils/docCode';
 import { DocStatusLabel } from './StatusLabel';
 
 interface MasterListViewProps {
   lang: Language;
   documents: ControlledDocument[];
   departments: DepartmentInfo[];
+  docTypes?: DocTypeDefinition[];
   globalSearch: string;
   onGlobalSearchChange: (value: string) => void;
   onOpenDocument: (docId: string) => void;
@@ -28,12 +31,11 @@ interface MasterListViewProps {
 
 type SortKey = 'docNumber' | 'title' | 'revision' | 'effectiveDate' | 'nextReviewDate';
 
-const DOC_TYPES: ('ALL' | DocType)[] = ['ALL', 'QM', 'QP', 'WI', 'FM', 'SD', 'EXT'];
-
 export const MasterListView: React.FC<MasterListViewProps> = ({
   lang,
   documents,
   departments,
+  docTypes = DEFAULT_DOC_TYPES,
   globalSearch,
   onGlobalSearchChange,
   onOpenDocument,
@@ -44,6 +46,10 @@ export const MasterListView: React.FC<MasterListViewProps> = ({
   const [selectedStatus, setSelectedStatus] = useState<'ALL' | DocStatus>('Active');
   const [sortKey, setSortKey] = useState<SortKey>('docNumber');
   const [sortAsc, setSortAsc] = useState<boolean>(true);
+  const typeOptions = useMemo(
+    () => ['ALL', ...docTypes.map((dt) => dt.code)],
+    [docTypes]
+  );
 
   const filteredDocs = useMemo(() => {
     const q = globalSearch.trim().toLowerCase();
@@ -188,7 +194,7 @@ export const MasterListView: React.FC<MasterListViewProps> = ({
         {/* Segmented Document Type Filter */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
           <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
-            {DOC_TYPES.map((type) => (
+            {typeOptions.map((type) => (
               <button
                 key={type}
                 type="button"

@@ -4,6 +4,7 @@ import {
   ControlledDocument,
   DarType,
   DepartmentInfo,
+  DocCodeConfig,
   DocType,
   DocumentActionRequest,
   DocumentContent,
@@ -11,6 +12,7 @@ import {
   UserProfile,
 } from '../types/dcc';
 import { t } from '../i18n/translations';
+import { computeNextDocNumber, DEFAULT_DOC_CODE_CONFIG } from '../utils/docCode';
 
 interface CreateDarModalProps {
   lang: Language;
@@ -21,6 +23,7 @@ interface CreateDarModalProps {
   };
   documents: ControlledDocument[];
   departments: DepartmentInfo[];
+  docCodeConfig?: DocCodeConfig;
   currentUser: UserProfile;
   onClose: () => void;
   onSubmitDar: (
@@ -31,14 +34,13 @@ interface CreateDarModalProps {
   ) => void;
 }
 
-const DOC_TYPES: DocType[] = ['QM', 'QP', 'WI', 'FM', 'SD', 'EXT'];
-
 export const CreateDarModal: React.FC<CreateDarModalProps> = ({
   lang,
   isOpen,
   initialMode,
   documents,
   departments,
+  docCodeConfig = DEFAULT_DOC_CODE_CONFIG,
   currentUser,
   onClose,
   onSubmitDar,
@@ -90,9 +92,17 @@ export const CreateDarModal: React.FC<CreateDarModalProps> = ({
         ).join('\n')
       );
     } else {
+      const defaultType =
+        docCodeConfig.docTypes.find((dt) => dt.code === 'WI')?.code ??
+        docCodeConfig.docTypes[0]?.code ??
+        'WI';
+      const defaultDept =
+        departments.find((d) => d.code === currentUser.department)?.code ??
+        departments[0]?.code ??
+        'QA';
       setTargetDocId(activeDocs[0]?.id ?? '');
-      setDocType('WI');
-      setDepartment(currentUser.department || 'QA');
+      setDocType(defaultType);
+      setDepartment(defaultDept);
       setTitleTh('');
       setTitleEn('');
       setIsoClause('7.5');
@@ -105,7 +115,7 @@ export const CreateDarModal: React.FC<CreateDarModalProps> = ({
     setAttachmentType(undefined);
     setAttachmentDataUrl(undefined);
     setAttachmentTextPreview(undefined);
-  }, [isOpen, initialMode, activeDocs, currentUser.department, lang]);
+  }, [isOpen, initialMode, activeDocs, currentUser.department, departments, docCodeConfig.docTypes, lang]);
 
   // Sync fields when user selects a different target doc for Revision/Obsolete
   const handleSelectTargetDoc = (id: string) => {
@@ -128,22 +138,19 @@ export const CreateDarModal: React.FC<CreateDarModalProps> = ({
     }
   };
 
-  // Auto-generate next sequential document code for New Issue
+  // Auto-generate next sequential document code for New Issue using configured schema
   const nextDocNumber = useMemo(() => {
     if (darType !== 'New Issue') {
       const target = documents.find((d) => d.id === targetDocId);
       return target?.docNumber ?? `${docType}-${department}-001`;
     }
-    const prefix = `${docType}-${department}-`;
-    const existingNums = documents
-      .filter((d) => d.docNumber.startsWith(prefix))
-      .map((d) => {
-        const tail = d.docNumber.slice(prefix.length);
-        return parseInt(tail, 10) || 0;
-      });
-    const nextSeq = (existingNums.length > 0 ? Math.max(...existingNums) : 0) + 1;
-    return `${prefix}${String(nextSeq).padStart(3, '0')}`;
-  }, [darType, targetDocId, docType, department, documents]);
+    return computeNextDocNumber(
+      docCodeConfig,
+      docType,
+      department,
+      documents.map((d) => d.docNumber)
+    );
+  }, [darType, targetDocId, docType, department, documents, docCodeConfig]);
 
   const currentRev = useMemo(() => {
     if (darType === 'New Issue') return '00';
@@ -343,9 +350,9 @@ export const CreateDarModal: React.FC<CreateDarModalProps> = ({
                   onChange={(e) => setDocType(e.target.value as DocType)}
                   className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100"
                 >
-                  {DOC_TYPES.map((dt) => (
-                    <option key={dt} value={dt}>
-                      {dt}
+                  {docCodeConfig.docTypes.map((dt) => (
+                    <option key={dt.code} value={dt.code}>
+                      {dt.code} — {lang === 'th' ? dt.nameTh : dt.nameEn}
                     </option>
                   ))}
                 </select>

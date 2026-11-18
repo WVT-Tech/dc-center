@@ -94,7 +94,8 @@ CREATE TABLE IF NOT EXISTS dcc_fishbones (
   direction TEXT NOT NULL,
   owner_name TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  factors_json TEXT NOT NULL
+  factors_json TEXT NOT NULL,
+  report_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS dcc_audit_events (

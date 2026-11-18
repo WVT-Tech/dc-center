@@ -4,6 +4,7 @@ import type {
   DbConnectionInfo,
   DepartmentInfo,
   DepartmentKpiFishbone,
+  DocCodeConfig,
   DocumentActionRequest,
   KpiTargets,
   RoleDefinition,
@@ -48,6 +49,7 @@ interface DccPersistedPayload {
   users: UserProfile[];
   roles?: RoleDefinition[];
   kpiTargets: KpiTargets;
+  docCodeConfig?: DocCodeConfig;
 }
 
 type SqlParam = string | number | null;
@@ -141,7 +143,8 @@ const SCHEMA_STATEMENTS: string[] = [
     direction TEXT NOT NULL,
     owner_name TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    factors_json TEXT NOT NULL
+    factors_json TEXT NOT NULL,
+    report_json TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS dcc_audit_events (
     id TEXT PRIMARY KEY,
@@ -265,6 +268,14 @@ async function ensureSchema(env: WorkerEnv): Promise<void> {
   } catch {
     // Ignore if already exists
   }
+  try {
+    const fbCols = await runQuery<{ name: string }>(env, 'PRAGMA table_info(dcc_fishbones)');
+    if (!fbCols.some((c) => c.name === 'report_json')) {
+      await runQuery(env, 'ALTER TABLE dcc_fishbones ADD COLUMN report_json TEXT');
+    }
+  } catch {
+    // Ignore if already exists
+  }
 }
 
 async function getStatus(env: WorkerEnv): Promise<DbConnectionInfo> {
@@ -336,8 +347,8 @@ async function readState(env: WorkerEnv): Promise<DccPersistedPayload | null> {
       runQuery<Record<string, unknown>>(env, 'SELECT * FROM dcc_audit_events ORDER BY timestamp DESC'),
       runQuery<Record<string, unknown>>(
         env,
-        'SELECT key, value_json FROM dcc_settings WHERE key = ?',
-        ['kpi_targets']
+        'SELECT key, value_json FROM dcc_settings WHERE key IN (?, ?)',
+        ['kpi_targets', 'doc_code_config']
       ),
     ]);
 
@@ -429,20 +440,32 @@ async function readState(env: WorkerEnv): Promise<DccPersistedPayload | null> {
         : undefined,
       logs: safeJsonParse(r.logs_json, []),
     })),
-    fishbones: fishboneRows.map((r) => ({
-      id: String(r.id),
-      department: String(r.department),
-      period: String(r.period),
-      mainKpiTitleTh: String(r.main_kpi_title_th),
-      mainKpiTitleEn: String(r.main_kpi_title_en),
-      targetValue: Number(r.target_value),
-      actualValue: Number(r.actual_value),
-      unit: String(r.unit),
-      direction: String(r.direction) as DepartmentKpiFishbone['direction'],
-      ownerName: String(r.owner_name),
-      updatedAt: String(r.updated_at),
-      factors: safeJsonParse(r.factors_json, []),
-    })),
+    fishbones: fishboneRows.map((r) => {
+      const reportMeta = r.report_json
+        ? safeJsonParse<Partial<DepartmentKpiFishbone>>(r.report_json, {})
+        : {};
+      return {
+        id: String(r.id),
+        department: String(r.department),
+        period: String(r.period),
+        mainKpiTitleTh: String(r.main_kpi_title_th),
+        mainKpiTitleEn: String(r.main_kpi_title_en),
+        targetValue: Number(r.target_value),
+        actualValue: Number(r.actual_value),
+        unit: String(r.unit),
+        direction: String(r.direction) as DepartmentKpiFishbone['direction'],
+        ownerName: String(r.owner_name),
+        updatedAt: String(r.updated_at),
+        factors: safeJsonParse(r.factors_json, []),
+        kpiCode: reportMeta.kpiCode,
+        monthLabel: reportMeta.monthLabel,
+        yearLabel: reportMeta.yearLabel,
+        prevYearAvg: reportMeta.prevYearAvg,
+        monthlyActuals: reportMeta.monthlyActuals,
+        immediateActions: reportMeta.immediateActions,
+        preventiveActions: reportMeta.preventiveActions,
+      };
+    }),
     auditEvents: auditRows.map((r) => ({
       id: String(r.id),
       timestamp: String(r.timestamp),
@@ -453,9 +476,10 @@ async function readState(env: WorkerEnv): Promise<DccPersistedPayload | null> {
       detailTh: String(r.detail_th),
       detailEn: String(r.detail_en),
     })),
-    kpiTargets:
-      settingRows.length > 0
-        ? safeJsonParse(settingRows[0].value_json, {
+    kpiTargets: (() => {
+      const kpiRow = settingRows.find((r) => String(r.key) === 'kpi_targets');
+      return kpiRow
+        ? safeJsonParse(kpiRow.value_json, {
             onTimeReviewPct: 95,
             ackRatePct: 90,
             firstPassPct: 85,
@@ -466,7 +490,14 @@ async function readState(env: WorkerEnv): Promise<DccPersistedPayload | null> {
             ackRatePct: 90,
             firstPassPct: 85,
             darSlaDays: 5,
-          },
+          };
+    })(),
+    docCodeConfig: (() => {
+      const cfgRow = settingRows.find((r) => String(r.key) === 'doc_code_config');
+      return cfgRow
+        ? safeJsonParse<DocCodeConfig | undefined>(cfgRow.value_json, undefined)
+        : undefined;
+    })(),
   };
 }
 
@@ -634,11 +665,20 @@ async function syncState(
   }
 
   for (const fb of payload.fishbones) {
+    const reportJson = JSON.stringify({
+      kpiCode: fb.kpiCode,
+      monthLabel: fb.monthLabel,
+      yearLabel: fb.yearLabel,
+      prevYearAvg: fb.prevYearAvg,
+      monthlyActuals: fb.monthlyActuals,
+      immediateActions: fb.immediateActions,
+      preventiveActions: fb.preventiveActions,
+    });
     await runQuery(
       env,
       `INSERT OR REPLACE INTO dcc_fishbones
-       (id, department, period, main_kpi_title_th, main_kpi_title_en, target_value, actual_value, unit, direction, owner_name, updated_at, factors_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, department, period, main_kpi_title_th, main_kpi_title_en, target_value, actual_value, unit, direction, owner_name, updated_at, factors_json, report_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         fb.id,
         fb.department,
@@ -652,6 +692,7 @@ async function syncState(
         fb.ownerName,
         fb.updatedAt,
         JSON.stringify(fb.factors),
+        reportJson,
       ]
     );
   }
@@ -681,6 +722,15 @@ async function syncState(
      VALUES (?, ?, ?)`,
     ['kpi_targets', JSON.stringify(payload.kpiTargets), nowIso]
   );
+
+  if (payload.docCodeConfig) {
+    await runQuery(
+      env,
+      `INSERT OR REPLACE INTO dcc_settings (key, value_json, updated_at)
+       VALUES (?, ?, ?)`,
+      ['doc_code_config', JSON.stringify(payload.docCodeConfig), nowIso]
+    );
+  }
 }
 
 export default {

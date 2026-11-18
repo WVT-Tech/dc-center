@@ -1,6 +1,19 @@
 export type Language = 'th' | 'en';
 
-export type DocType = 'QM' | 'QP' | 'WI' | 'FM' | 'SD' | 'EXT';
+export type DocType = string;
+
+export interface DocTypeDefinition {
+  code: string;
+  nameTh: string;
+  nameEn: string;
+}
+
+export interface DocCodeConfig {
+  pattern: string;
+  prefix: string;
+  seqDigits: number;
+  docTypes: DocTypeDefinition[];
+}
 
 export type DocStatus = 'Active' | 'Pending Review' | 'Draft' | 'Obsolete';
 
@@ -64,6 +77,22 @@ export interface FishboneFactor {
   actionPlan?: string;
 }
 
+export interface KaizenImmediateAction {
+  id: string;
+  problemFound: string;
+  responsible: string;
+  immediateAction: string;
+  dueDate: string;
+}
+
+export interface KaizenPreventiveAction {
+  id: string;
+  longTermPlan: string;
+  responsible: string;
+  dueDate: string;
+  remark: string;
+}
+
 export interface DepartmentKpiFishbone {
   id: string;
   department: string;
@@ -77,6 +106,13 @@ export interface DepartmentKpiFishbone {
   ownerName: string;
   updatedAt: string;
   factors: FishboneFactor[];
+  kpiCode?: string;
+  monthLabel?: string;
+  yearLabel?: string;
+  prevYearAvg?: number;
+  monthlyActuals?: (number | null)[];
+  immediateActions?: KaizenImmediateAction[];
+  preventiveActions?: KaizenPreventiveAction[];
 }
 
 export interface DepartmentInfo {
@@ -183,6 +219,9 @@ export type AuditActionType =
   | 'DOC_ACKNOWLEDGED'
   | 'DOC_OBSOLETED'
   | 'DEPT_ADDED'
+  | 'DEPT_UPDATED'
+  | 'DEPT_DELETED'
+  | 'DOC_SCHEMA_UPDATED'
   | 'USER_LOGIN'
   | 'USER_LOGOUT'
   | 'USER_ADDED'

@@ -20,6 +20,8 @@ import {
   DocumentActionRequest,
   FishboneCategory,
   FishboneFactor,
+  KaizenImmediateAction,
+  KaizenPreventiveAction,
   KpiTargets,
   Language,
   NavSection,
@@ -29,11 +31,15 @@ import {
 import { t } from '../i18n/translations';
 import { computeDccKpis } from '../utils/kpiMetrics';
 import {
-  FishboneDiagram,
   getCategoryLabel,
   isFactorMet,
   isHeadMet,
 } from './FishboneDiagram';
+import {
+  EN_MONTH_ABBR,
+  KaizenKpiReport,
+  THAI_MONTH_ABBR,
+} from './KaizenKpiReport';
 
 interface KpiViewProps {
   lang: Language;
@@ -150,17 +156,45 @@ export const KpiView: React.FC<KpiViewProps> = ({
   // Permissions: Admin ('dcc') / global role can edit any dept; department-scoped roles can edit their own dept
   const canEditDept = hasAllDeptKpiAccess || effectiveDept === selectedDept;
 
-  // Head form state
+  // Head form state (with Kaizen Header fields)
   const [headPeriod, setHeadPeriod] = useState('Q4 / 2026');
+  const [headKpiCode, setHeadKpiCode] = useState('');
+  const [headMonthLabel, setHeadMonthLabel] = useState('พฤศจิกายน');
+  const [headYearLabel, setHeadYearLabel] = useState('2569');
+  const [headPrevYearAvg, setHeadPrevYearAvg] = useState('0');
   const [headTitleTh, setHeadTitleTh] = useState('');
   const [headTitleEn, setHeadTitleEn] = useState('');
-  const [headTarget, setHeadTarget] = useState('95');
-  const [headActual, setHeadActual] = useState('90');
-  const [headUnit, setHeadUnit] = useState('%');
+  const [headTarget, setHeadTarget] = useState('0');
+  const [headActual, setHeadActual] = useState('0');
+  const [headUnit, setHeadUnit] = useState('ครั้ง');
   const [headDirection, setHeadDirection] = useState<'higher-better' | 'lower-better'>(
-    'higher-better'
+    'lower-better'
   );
   const [headOwner, setHeadOwner] = useState('');
+
+  // Monthly 12-month statistics modal
+  const [monthlyModalOpen, setMonthlyModalOpen] = useState(false);
+  const [monthlyDraft, setMonthlyDraft] = useState<string[]>(Array(12).fill(''));
+
+  // Part 1 Immediate Action modal
+  const [immediateModal, setImmediateModal] = useState<{
+    open: boolean;
+    editing?: KaizenImmediateAction;
+  }>({ open: false });
+  const [immProblem, setImmProblem] = useState('');
+  const [immResp, setImmResp] = useState('');
+  const [immAction, setImmAction] = useState('');
+  const [immDue, setImmDue] = useState('');
+
+  // Part 2 Preventive Action modal
+  const [preventiveModal, setPreventiveModal] = useState<{
+    open: boolean;
+    editing?: KaizenPreventiveAction;
+  }>({ open: false });
+  const [prevPlan, setPrevPlan] = useState('');
+  const [prevResp, setPrevResp] = useState('');
+  const [prevDue, setPrevDue] = useState('');
+  const [prevRemark, setPrevRemark] = useState('');
 
   // Factor form state
   const [facCategory, setFacCategory] = useState<FishboneCategory>('Man');
@@ -179,13 +213,17 @@ export const KpiView: React.FC<KpiViewProps> = ({
   const openCreateHeadModal = () => {
     const deptObj = departments.find((d) => d.code === selectedDept);
     setIsCreatingNewSheet(true);
-    setHeadPeriod('Q4 / 2026');
+    setHeadPeriod('2569');
+    setHeadKpiCode(`KPI-${selectedDept}-${String(deptSheets.length + 1).padStart(2, '0')}`);
+    setHeadMonthLabel('พฤศจิกายน');
+    setHeadYearLabel('2569');
+    setHeadPrevYearAvg('0');
     setHeadTitleTh('');
     setHeadTitleEn('');
-    setHeadTarget('95');
+    setHeadTarget('0');
     setHeadActual('0');
-    setHeadUnit('%');
-    setHeadDirection('higher-better');
+    setHeadUnit('ครั้ง');
+    setHeadDirection('lower-better');
     setHeadOwner(deptObj?.headName ?? currentUser.nameTh);
     setHeadModalOpen(true);
   };
@@ -194,6 +232,10 @@ export const KpiView: React.FC<KpiViewProps> = ({
     if (!currentFishbone) return;
     setIsCreatingNewSheet(false);
     setHeadPeriod(currentFishbone.period);
+    setHeadKpiCode(currentFishbone.kpiCode ?? `KPI-${currentFishbone.department}-01`);
+    setHeadMonthLabel(currentFishbone.monthLabel ?? 'พฤศจิกายน');
+    setHeadYearLabel(currentFishbone.yearLabel ?? '2569');
+    setHeadPrevYearAvg(String(currentFishbone.prevYearAvg ?? 0));
     setHeadTitleTh(currentFishbone.mainKpiTitleTh);
     setHeadTitleEn(currentFishbone.mainKpiTitleEn);
     setHeadTarget(String(currentFishbone.targetValue));
@@ -211,7 +253,7 @@ export const KpiView: React.FC<KpiViewProps> = ({
       ? {
           id: `fb-${selectedDept.toLowerCase()}-${Date.now()}`,
           department: selectedDept,
-          period: headPeriod.trim() || 'Q4 / 2026',
+          period: headPeriod.trim() || headYearLabel.trim() || '2569',
           mainKpiTitleTh: headTitleTh.trim(),
           mainKpiTitleEn: headTitleEn.trim() || headTitleTh.trim(),
           targetValue: Number(headTarget) || 0,
@@ -221,6 +263,13 @@ export const KpiView: React.FC<KpiViewProps> = ({
           ownerName: headOwner.trim() || currentUser.nameTh,
           updatedAt: todayStr,
           factors: [],
+          kpiCode: headKpiCode.trim() || `KPI-${selectedDept}-01`,
+          monthLabel: headMonthLabel.trim() || 'พฤศจิกายน',
+          yearLabel: headYearLabel.trim() || '2569',
+          prevYearAvg: Number(headPrevYearAvg) || 0,
+          monthlyActuals: Array(12).fill(null),
+          immediateActions: [],
+          preventiveActions: [],
         }
       : {
           ...currentFishbone,
@@ -232,12 +281,146 @@ export const KpiView: React.FC<KpiViewProps> = ({
           unit: headUnit.trim() || '%',
           direction: headDirection,
           ownerName: headOwner.trim() || currentFishbone.ownerName,
+          kpiCode: headKpiCode.trim() || currentFishbone.kpiCode,
+          monthLabel: headMonthLabel.trim() || currentFishbone.monthLabel,
+          yearLabel: headYearLabel.trim() || currentFishbone.yearLabel,
+          prevYearAvg: Number(headPrevYearAvg) || 0,
           updatedAt: todayStr,
         };
 
     onUpsertFishbone(nextFb);
     setSelectedSheetId(nextFb.id);
     setHeadModalOpen(false);
+  };
+
+  const openMonthlyModal = () => {
+    if (!currentFishbone) return;
+    const draft = Array.from({ length: 12 }, (_, idx) => {
+      const v = currentFishbone.monthlyActuals?.[idx];
+      return typeof v === 'number' && !Number.isNaN(v) ? String(v) : '';
+    });
+    setMonthlyDraft(draft);
+    setMonthlyModalOpen(true);
+  };
+
+  const handleSaveMonthlyStats = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentFishbone) return;
+    const parsed: (number | null)[] = monthlyDraft.map((s) => {
+      const trimmed = s.trim();
+      if (trimmed === '') return null;
+      const num = Number(trimmed);
+      return Number.isNaN(num) ? null : num;
+    });
+    const filled = parsed.filter((v): v is number => v !== null);
+    const latestActual =
+      filled.length > 0 ? filled[filled.length - 1] : currentFishbone.actualValue;
+
+    onUpsertFishbone({
+      ...currentFishbone,
+      actualValue: latestActual,
+      monthlyActuals: parsed,
+      updatedAt: todayStr,
+    });
+    setMonthlyModalOpen(false);
+  };
+
+  const openAddImmediateModal = () => {
+    const deptObj = departments.find((d) => d.code === selectedDept);
+    setImmProblem('');
+    setImmResp(deptObj?.headName ?? currentUser.nameTh);
+    setImmAction('');
+    setImmDue(todayStr);
+    setImmediateModal({ open: true });
+  };
+
+  const openEditImmediateModal = (item: KaizenImmediateAction) => {
+    setImmProblem(item.problemFound);
+    setImmResp(item.responsible);
+    setImmAction(item.immediateAction);
+    setImmDue(item.dueDate);
+    setImmediateModal({ open: true, editing: item });
+  };
+
+  const handleSaveImmediate = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentFishbone || !immProblem.trim()) return;
+    const entry: KaizenImmediateAction = {
+      id: immediateModal.editing?.id ?? `imm-${Date.now()}`,
+      problemFound: immProblem.trim(),
+      responsible: immResp.trim() || currentUser.nameTh,
+      immediateAction: immAction.trim(),
+      dueDate: immDue.trim() || todayStr,
+    };
+    const existing = currentFishbone.immediateActions ?? [];
+    const nextList = immediateModal.editing
+      ? existing.map((x) => (x.id === entry.id ? entry : x))
+      : [...existing, entry];
+
+    onUpsertFishbone({
+      ...currentFishbone,
+      immediateActions: nextList,
+      updatedAt: todayStr,
+    });
+    setImmediateModal({ open: false });
+  };
+
+  const handleDeleteImmediate = (id: string) => {
+    if (!currentFishbone) return;
+    onUpsertFishbone({
+      ...currentFishbone,
+      immediateActions: (currentFishbone.immediateActions ?? []).filter((x) => x.id !== id),
+      updatedAt: todayStr,
+    });
+  };
+
+  const openAddPreventiveModal = () => {
+    const deptObj = departments.find((d) => d.code === selectedDept);
+    setPrevPlan('');
+    setPrevResp(deptObj?.headName ?? currentUser.nameTh);
+    setPrevDue(todayStr);
+    setPrevRemark('');
+    setPreventiveModal({ open: true });
+  };
+
+  const openEditPreventiveModal = (item: KaizenPreventiveAction) => {
+    setPrevPlan(item.longTermPlan);
+    setPrevResp(item.responsible);
+    setPrevDue(item.dueDate);
+    setPrevRemark(item.remark);
+    setPreventiveModal({ open: true, editing: item });
+  };
+
+  const handleSavePreventive = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentFishbone || !prevPlan.trim()) return;
+    const entry: KaizenPreventiveAction = {
+      id: preventiveModal.editing?.id ?? `prev-${Date.now()}`,
+      longTermPlan: prevPlan.trim(),
+      responsible: prevResp.trim() || currentUser.nameTh,
+      dueDate: prevDue.trim() || todayStr,
+      remark: prevRemark.trim(),
+    };
+    const existing = currentFishbone.preventiveActions ?? [];
+    const nextList = preventiveModal.editing
+      ? existing.map((x) => (x.id === entry.id ? entry : x))
+      : [...existing, entry];
+
+    onUpsertFishbone({
+      ...currentFishbone,
+      preventiveActions: nextList,
+      updatedAt: todayStr,
+    });
+    setPreventiveModal({ open: false });
+  };
+
+  const handleDeletePreventive = (id: string) => {
+    if (!currentFishbone) return;
+    onUpsertFishbone({
+      ...currentFishbone,
+      preventiveActions: (currentFishbone.preventiveActions ?? []).filter((x) => x.id !== id),
+      updatedAt: todayStr,
+    });
   };
 
   const openAddFactorModal = (category: FishboneCategory) => {
@@ -426,7 +609,7 @@ export const KpiView: React.FC<KpiViewProps> = ({
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
             >
               <Printer className="w-3.5 h-3.5" />
-              <span>{lang === 'th' ? 'พิมพ์ผังก้างปลา' : 'Print Fishbone'}</span>
+              <span>{lang === 'th' ? 'พิมพ์รายงาน KPI' : 'Print KPI Report'}</span>
             </button>
           </div>
         )}
@@ -537,14 +720,22 @@ export const KpiView: React.FC<KpiViewProps> = ({
             </div>
           ) : (
             <>
-              {/* Interactive Ishikawa Fishbone Diagram */}
-              <FishboneDiagram
+              {/* Kaizen KPI Report Form Sheet (Header + Monthly Line Chart + 5M1E Fishbone + Part 1/2 Actions) */}
+              <KaizenKpiReport
                 lang={lang}
                 fishbone={currentFishbone}
+                departmentInfo={departments.find((d) => d.code === currentFishbone.department)}
                 canEdit={canEditDept}
+                onEditHead={openEditHeadModal}
+                onEditMonthlyStats={openMonthlyModal}
                 onAddFactor={openAddFactorModal}
                 onEditFactor={openEditFactorModal}
-                onEditHead={openEditHeadModal}
+                onAddImmediate={openAddImmediateModal}
+                onEditImmediate={openEditImmediateModal}
+                onDeleteImmediate={handleDeleteImmediate}
+                onAddPreventive={openAddPreventiveModal}
+                onEditPreventive={openEditPreventiveModal}
+                onDeletePreventive={handleDeletePreventive}
               />
 
               {/* Structured 6M Fishbone Entry Table */}
@@ -949,15 +1140,15 @@ export const KpiView: React.FC<KpiViewProps> = ({
         </div>
       )}
 
-      {/* Modal: Edit / Create Fishbone Head KPI */}
+      {/* Modal: Edit / Create Kaizen KPI Header & Main Goal */}
       {headModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
             className="fixed inset-0 bg-slate-950/60"
             onClick={() => setHeadModalOpen(false)}
           />
-          <div className="relative z-10 w-full max-w-lg rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+          <div className="relative z-10 w-full max-w-xl rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
                 {isCreatingNewSheet
                   ? `${t(lang, 'fishboneAddSheet')} (${selectedDept})`
@@ -971,19 +1162,85 @@ export const KpiView: React.FC<KpiViewProps> = ({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <form onSubmit={handleSaveHead} className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+            <form onSubmit={handleSaveHead} className="p-6 space-y-4 overflow-y-auto">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                    {lang === 'th' ? 'รอบติดตามผล (Period)' : 'Period'}
+                    KPI Code
+                  </label>
+                  <input
+                    type="text"
+                    value={headKpiCode}
+                    onChange={(e) => setHeadKpiCode(e.target.value)}
+                    placeholder={`KPI-${selectedDept}-01`}
+                    className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                    {lang === 'th' ? 'เดือนที่รายงาน' : 'Month'}
+                  </label>
+                  <input
+                    type="text"
+                    value={headMonthLabel}
+                    onChange={(e) => setHeadMonthLabel(e.target.value)}
+                    placeholder="พฤศจิกายน"
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                    {lang === 'th' ? 'พ.ศ. / ปี' : 'Year'}
+                  </label>
+                  <input
+                    type="text"
+                    value={headYearLabel}
+                    onChange={(e) => setHeadYearLabel(e.target.value)}
+                    placeholder="2569"
+                    className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                    {lang === 'th' ? 'รอบ (Period)' : 'Period'}
                   </label>
                   <input
                     type="text"
                     required
                     value={headPeriod}
                     onChange={(e) => setHeadPeriod(e.target.value)}
-                    placeholder="Q4 / 2026"
-                    className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    placeholder="2569"
+                    className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th'
+                    ? 'หัวข้อการปรับปรุง / KPI หลัก (ภาษาไทย) *'
+                    : 'Kaizen Topic / Main KPI (TH) *'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={headTitleTh}
+                  onChange={(e) => setHeadTitleTh(e.target.value)}
+                  placeholder="เช่น จำนวนการรับคืนสินค้าที่เกิดความเสียหายจากการจัดส่ง"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                    {lang === 'th' ? 'หัวข้อ KPI (ภาษาอังกฤษ)' : 'Main KPI Goal (EN)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={headTitleEn}
+                    onChange={(e) => setHeadTitleEn(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   />
                 </div>
                 <div>
@@ -994,38 +1251,12 @@ export const KpiView: React.FC<KpiViewProps> = ({
                     type="text"
                     value={headOwner}
                     onChange={(e) => setHeadOwner(e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                  {lang === 'th' ? 'ชื่อเป้าหมาย KPI หลัก (ภาษาไทย) *' : 'Main KPI Goal (TH) *'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={headTitleTh}
-                  onChange={(e) => setHeadTitleTh(e.target.value)}
-                  placeholder="เช่น ลดอัตราของเสียในสายการผลิต..."
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                  {lang === 'th' ? 'ชื่อเป้าหมาย KPI หลัก (ภาษาอังกฤษ)' : 'Main KPI Goal (EN)'}
-                </label>
-                <input
-                  type="text"
-                  value={headTitleEn}
-                  onChange={(e) => setHeadTitleEn(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
                     {lang === 'th' ? 'ผลจริง' : 'Actual'}
@@ -1036,7 +1267,7 @@ export const KpiView: React.FC<KpiViewProps> = ({
                     required
                     value={headActual}
                     onChange={(e) => setHeadActual(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    className="w-full px-3 py-2 text-xs font-mono tabular-nums rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   />
                 </div>
                 <div>
@@ -1049,7 +1280,19 @@ export const KpiView: React.FC<KpiViewProps> = ({
                     required
                     value={headTarget}
                     onChange={(e) => setHeadTarget(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    className="w-full px-3 py-2 text-xs font-mono tabular-nums rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                    {lang === 'th' ? 'เฉลี่ยปีก่อน' : 'Prev Avg'}
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={headPrevYearAvg}
+                    onChange={(e) => setHeadPrevYearAvg(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-mono tabular-nums rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   />
                 </div>
                 <div>
@@ -1061,7 +1304,7 @@ export const KpiView: React.FC<KpiViewProps> = ({
                     required
                     value={headUnit}
                     onChange={(e) => setHeadUnit(e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   />
                 </div>
                 <div>
@@ -1075,7 +1318,7 @@ export const KpiView: React.FC<KpiViewProps> = ({
                         e.target.value as 'higher-better' | 'lower-better'
                       )
                     }
-                    className="w-full px-2.5 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    className="w-full px-2 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                   >
                     <option value="higher-better">≥ (สูงดี)</option>
                     <option value="lower-better">≤ (ต่ำดี)</option>
@@ -1095,7 +1338,261 @@ export const KpiView: React.FC<KpiViewProps> = ({
                   type="submit"
                   className="px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white"
                 >
-                  {lang === 'th' ? 'บันทึกข้อมูล' : 'Save KPI Head'}
+                  {lang === 'th' ? 'บันทึกข้อมูล' : 'Save KPI Report'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit 12-Month Trend Statistics */}
+      {monthlyModalOpen && currentFishbone && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-slate-950/60"
+            onClick={() => setMonthlyModalOpen(false)}
+          />
+          <div className="relative z-10 w-full max-w-lg rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                {lang === 'th'
+                  ? `บันทึกสถิติรายเดือน (${currentFishbone.unit})`
+                  : `Monthly Trend Data (${currentFishbone.unit})`}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setMonthlyModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveMonthlyStats} className="p-6 space-y-4">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {lang === 'th'
+                  ? 'กรอกผลลัพธ์จริงของแต่ละเดือน (ปล่อยว่างสำหรับเดือนที่ยังไม่ถึง) ระบบจะอัปเดตกราฟเส้นและค่าล่าสุดอัตโนมัติ'
+                  : 'Enter actual values for each month (leave future months blank).'}
+              </p>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+                {(lang === 'th' ? THAI_MONTH_ABBR : EN_MONTH_ABBR).map((mLabel, idx) => (
+                  <div key={mLabel}>
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                      {mLabel}
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={monthlyDraft[idx] ?? ''}
+                      onChange={(e) => {
+                        const next = [...monthlyDraft];
+                        next[idx] = e.target.value;
+                        setMonthlyDraft(next);
+                      }}
+                      placeholder="—"
+                      className="w-full px-2.5 py-1.5 text-xs font-mono tabular-nums rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMonthlyModalOpen(false)}
+                  className="px-4 py-2 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700"
+                >
+                  {t(lang, 'cancelBtn')}
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white"
+                >
+                  {lang === 'th' ? 'บันทึกสถิติรายเดือน' : 'Save Monthly Data'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Part 1 Immediate Containment Action */}
+      {immediateModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-slate-950/60"
+            onClick={() => setImmediateModal({ open: false })}
+          />
+          <div className="relative z-10 w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                {lang === 'th'
+                  ? 'ส่วนที่ 1 : การดำเนินการแก้ไขเบื้องต้น'
+                  : 'Part 1 : Immediate Containment Action'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setImmediateModal({ open: false })}
+                className="p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveImmediate} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'ปัญหาที่พบ (สาเหตุสุดท้าย) *' : 'Problem / Root Cause Found *'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={immProblem}
+                  onChange={(e) => setImmProblem(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'การดำเนินการเบื้องต้น *' : 'Immediate Action *'}
+                </label>
+                <textarea
+                  required
+                  rows={2}
+                  value={immAction}
+                  onChange={(e) => setImmAction(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                    {lang === 'th' ? 'ผู้รับผิดชอบ' : 'Responsible'}
+                  </label>
+                  <input
+                    type="text"
+                    value={immResp}
+                    onChange={(e) => setImmResp(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                    {lang === 'th' ? 'กำหนดเสร็จ' : 'Due Date'}
+                  </label>
+                  <input
+                    type="text"
+                    value={immDue}
+                    onChange={(e) => setImmDue(e.target.value)}
+                    placeholder="2026-11-30"
+                    className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </div>
+              </div>
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setImmediateModal({ open: false })}
+                  className="px-4 py-2 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700"
+                >
+                  {t(lang, 'cancelBtn')}
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white"
+                >
+                  {lang === 'th' ? 'บันทึกรายการ' : 'Save Item'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Part 2 Preventive Action */}
+      {preventiveModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-slate-950/60"
+            onClick={() => setPreventiveModal({ open: false })}
+          />
+          <div className="relative z-10 w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                {lang === 'th'
+                  ? 'ส่วนที่ 2 : การปฏิบัติป้องกันปัญหาซ้ำ'
+                  : 'Part 2 : Long-Term Preventive Action'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setPreventiveModal({ open: false })}
+                className="p-1 text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleSavePreventive} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th'
+                    ? 'แนวทางแก้ไขป้องกันปัญหาระยะยาว *'
+                    : 'Long-Term Preventive Plan *'}
+                </label>
+                <textarea
+                  required
+                  rows={2}
+                  value={prevPlan}
+                  onChange={(e) => setPrevPlan(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                    {lang === 'th' ? 'ผู้รับผิดชอบ' : 'Responsible'}
+                  </label>
+                  <input
+                    type="text"
+                    value={prevResp}
+                    onChange={(e) => setPrevResp(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                    {lang === 'th' ? 'กำหนดเสร็จ' : 'Due Date'}
+                  </label>
+                  <input
+                    type="text"
+                    value={prevDue}
+                    onChange={(e) => setPrevDue(e.target.value)}
+                    placeholder="2026-12-15"
+                    className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                  {lang === 'th' ? 'หมายเหตุ' : 'Remark'}
+                </label>
+                <input
+                  type="text"
+                  value={prevRemark}
+                  onChange={(e) => setPrevRemark(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                />
+              </div>
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPreventiveModal({ open: false })}
+                  className="px-4 py-2 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700"
+                >
+                  {t(lang, 'cancelBtn')}
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-xs font-medium rounded-lg bg-slate-900 dark:bg-blue-600 text-white"
+                >
+                  {lang === 'th' ? 'บันทึกรายการ' : 'Save Item'}
                 </button>
               </div>
             </form>
