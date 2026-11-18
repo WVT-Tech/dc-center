@@ -33,6 +33,7 @@ interface OverviewViewProps {
   auditEvents: AuditEvent[];
   todayStr: string;
   kpiTargets: KpiTargets;
+  canViewAuditTrail?: boolean;
   onNavigate: (nav: NavSection) => void;
   onOpenDocument: (docId: string) => void;
   onOpenDarQueue: () => void;
@@ -47,6 +48,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
   auditEvents,
   todayStr,
   kpiTargets,
+  canViewAuditTrail = true,
   onNavigate,
   onOpenDocument,
   onOpenDarQueue,
@@ -406,14 +408,16 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
             {t(lang, 'overviewAuditTitle')}
           </h2>
-          <button
-            type="button"
-            onClick={() => onNavigate('audit-trail')}
-            className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
-          >
-            <span>{t(lang, 'viewAll')}</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
+          {canViewAuditTrail && (
+            <button
+              type="button"
+              onClick={() => onNavigate('audit-trail')}
+              className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              <span>{t(lang, 'viewAll')}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         <div className="overflow-x-auto">

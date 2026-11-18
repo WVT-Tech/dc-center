@@ -32,6 +32,7 @@ interface SidebarProps {
     pendingDars: number;
     obsoleteDocs: number;
   };
+  canViewRestrictedMenus?: boolean;
   mobileOpen: boolean;
   onCloseMobile: () => void;
 }
@@ -48,6 +49,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSwitchUser,
   onLogout,
   counts,
+  canViewRestrictedMenus = true,
   mobileOpen,
   onCloseMobile,
 }) => {
@@ -62,8 +64,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'master-list', label: t(lang, 'navMasterList'), icon: FileSpreadsheet, count: counts.activeDocs },
     { id: 'dar-workflow', label: t(lang, 'navDarWorkflow'), icon: FileCheck2, count: counts.pendingDars },
     { id: 'archive', label: t(lang, 'navArchive'), icon: Archive, count: counts.obsoleteDocs },
-    { id: 'audit-trail', label: t(lang, 'navAuditTrail'), icon: History },
-    { id: 'settings', label: t(lang, 'navSettings'), icon: Building2 },
+    ...(canViewRestrictedMenus
+      ? [
+          { id: 'audit-trail' as NavSection, label: t(lang, 'navAuditTrail'), icon: History },
+          { id: 'settings' as NavSection, label: t(lang, 'navSettings'), icon: Building2 },
+        ]
+      : []),
   ];
 
   const handleNavClick = (id: NavSection) => {

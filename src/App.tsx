@@ -202,6 +202,28 @@ export default function App() {
     [users, authenticatedUserId]
   );
 
+  const currentRoleDef = useMemo(
+    () =>
+      roles.find(
+        (r) =>
+          (currentUser.roleId && r.id === currentUser.roleId) ||
+          (r.name === currentUser.role &&
+            (r.department === currentUser.department || r.department === 'ALL'))
+      ),
+    [roles, currentUser]
+  );
+
+  const hasAllRoleAccess =
+    Boolean(currentUser.isAdmin) ||
+    currentUser.username.toLowerCase() === 'dcc' ||
+    currentRoleDef?.department === 'ALL';
+
+  useEffect(() => {
+    if (!hasAllRoleAccess && (activeNav === 'audit-trail' || activeNav === 'settings')) {
+      setActiveNav('overview');
+    }
+  }, [hasAllRoleAccess, activeNav]);
+
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
   }, [darkMode]);
@@ -1229,6 +1251,7 @@ export default function App() {
         onSwitchUser={setAuthenticatedUserId}
         onLogout={handleLogout}
         counts={counts}
+        canViewRestrictedMenus={hasAllRoleAccess}
         mobileOpen={mobileNavOpen}
         onCloseMobile={() => setMobileNavOpen(false)}
       />
@@ -1270,6 +1293,7 @@ export default function App() {
               auditEvents={auditEvents}
               todayStr={TODAY_STR}
               kpiTargets={kpiTargets}
+              canViewAuditTrail={hasAllRoleAccess}
               onNavigate={setActiveNav}
               onOpenDocument={(id) => setSelectedDocId(id)}
               onOpenDarQueue={() => setActiveNav('dar-workflow')}
@@ -1338,11 +1362,11 @@ export default function App() {
             />
           )}
 
-          {activeNav === 'audit-trail' && (
+          {hasAllRoleAccess && activeNav === 'audit-trail' && (
             <AuditTrailView lang={lang} events={auditEvents} />
           )}
 
-          {activeNav === 'settings' && (
+          {hasAllRoleAccess && activeNav === 'settings' && (
             <SettingsView
               lang={lang}
               departments={departments}
