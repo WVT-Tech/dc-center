@@ -102,26 +102,40 @@ export const KpiView: React.FC<KpiViewProps> = ({
       ? userRoleDef.department
       : currentUser.department;
 
+  const kpiDepartments = useMemo(
+    () =>
+      departments.filter(
+        (d) => !['DCC', 'QMR'].includes(d.code.trim().toUpperCase())
+      ),
+    [departments]
+  );
+
   const visibleDepartments = useMemo(
     () =>
       hasAllDeptKpiAccess
-        ? departments
-        : departments.filter((d) => d.code === effectiveDept),
-    [departments, hasAllDeptKpiAccess, effectiveDept]
+        ? kpiDepartments
+        : kpiDepartments.filter((d) => d.code === effectiveDept),
+    [kpiDepartments, hasAllDeptKpiAccess, effectiveDept]
   );
 
   const [activeTab, setActiveTab] = useState<'fishbone' | 'summary'>('fishbone');
   const [selectedDept, setSelectedDept] = useState<string>(
-    hasAllDeptKpiAccess ? departments[0]?.code ?? effectiveDept : effectiveDept
+    hasAllDeptKpiAccess
+      ? kpiDepartments[0]?.code ?? ''
+      : kpiDepartments.some((d) => d.code === effectiveDept)
+        ? effectiveDept
+        : ''
   );
 
   useEffect(() => {
     if (!hasAllDeptKpiAccess) {
-      setSelectedDept(effectiveDept);
-    } else if (!departments.some((d) => d.code === selectedDept) && departments[0]) {
-      setSelectedDept(departments[0].code);
+      setSelectedDept(
+        kpiDepartments.some((d) => d.code === effectiveDept) ? effectiveDept : ''
+      );
+    } else if (!kpiDepartments.some((d) => d.code === selectedDept)) {
+      setSelectedDept(kpiDepartments[0]?.code ?? '');
     }
-  }, [hasAllDeptKpiAccess, effectiveDept, departments, selectedDept]);
+  }, [hasAllDeptKpiAccess, effectiveDept, kpiDepartments, selectedDept]);
 
   // Modals for Fishbone Head & Sub-Factor Entry
   const [headModalOpen, setHeadModalOpen] = useState(false);
@@ -154,7 +168,8 @@ export const KpiView: React.FC<KpiViewProps> = ({
   );
 
   // Permissions: Admin ('dcc') / global role can edit any dept; department-scoped roles can edit their own dept
-  const canEditDept = hasAllDeptKpiAccess || effectiveDept === selectedDept;
+  const canEditDept =
+    Boolean(selectedDept) && (hasAllDeptKpiAccess || effectiveDept === selectedDept);
 
   // Head form state (with Kaizen Header fields)
   const [headPeriod, setHeadPeriod] = useState('Q4 / 2026');

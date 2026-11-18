@@ -1422,13 +1422,11 @@ export default function App() {
               documents={documents}
               dars={dars}
               departments={departments}
+              fishbones={fishbones}
               docTypes={docCodeConfig.docTypes}
-              auditEvents={auditEvents}
               todayStr={TODAY_STR}
               kpiTargets={kpiTargets}
-              canViewAuditTrail={hasAllRoleAccess}
               onNavigate={setActiveNav}
-              onOpenDocument={(id) => setSelectedDocId(id)}
               onOpenDarQueue={() => setActiveNav('dar-workflow')}
             />
           )}
