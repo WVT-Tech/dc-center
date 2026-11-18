@@ -1,6 +1,7 @@
-name = "document-control-center"
+name = "dc-center"
 main = "worker/index.ts"
 compatibility_date = "2025-01-01"
+keep_vars = true
 
 [assets]
 directory = "./dist"
@@ -8,12 +9,11 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = ["/api/*"]
 
-# Optional: Bind your Cloudflare D1 database directly by uncommenting below and setting your real database_id,
-# OR attach a D1 binding named "DB" in Cloudflare Dashboard (Workers & Pages -> Settings -> Bindings),
-# OR set CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_D1_DATABASE_ID, and CLOUDFLARE_API_TOKEN as Worker Secrets.
+# IMPORTANT: Bindings added only in the Cloudflare Dashboard are removed on the next GitHub/Wrangler deploy
+# unless [[d1_databases]] is declared below with your real database_id.
+# Uncomment the 4 lines below and replace <YOUR_D1_DATABASE_ID> with your dcc-database UUID from Cloudflare Dashboard -> D1:
 #
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "dcc-database"
-# database_id = "<YOUR_D1_DATABASE_ID>"
-# migrations_dir = "d1"
+[[d1_databases]]
+binding = "DB"
+database_name = "dcc-database"
+database_id = "41328f22-d402-4500-95c2-6139fca73753"

@@ -256,25 +256,34 @@ async function runQuery<T = Record<string, unknown>>(
   );
 }
 
+let schemaEnsured = false;
+
 async function ensureSchema(env: WorkerEnv): Promise<void> {
-  for (const stmt of SCHEMA_STATEMENTS) {
-    await runQuery(env, stmt);
-  }
+  if (schemaEnsured) return;
   try {
-    const cols = await runQuery<{ name: string }>(env, 'PRAGMA table_info(dcc_users)');
-    if (!cols.some((c) => c.name === 'role_id')) {
-      await runQuery(env, 'ALTER TABLE dcc_users ADD COLUMN role_id TEXT');
+    for (const stmt of SCHEMA_STATEMENTS) {
+      await runQuery(env, stmt);
     }
-  } catch {
-    // Ignore if already exists
-  }
-  try {
-    const fbCols = await runQuery<{ name: string }>(env, 'PRAGMA table_info(dcc_fishbones)');
-    if (!fbCols.some((c) => c.name === 'report_json')) {
-      await runQuery(env, 'ALTER TABLE dcc_fishbones ADD COLUMN report_json TEXT');
+    try {
+      const cols = await runQuery<{ name: string }>(env, 'PRAGMA table_info(dcc_users)');
+      if (!cols.some((c) => c.name === 'role_id')) {
+        await runQuery(env, 'ALTER TABLE dcc_users ADD COLUMN role_id TEXT');
+      }
+    } catch {
+      // Ignore if already exists
     }
-  } catch {
-    // Ignore if already exists
+    try {
+      const fbCols = await runQuery<{ name: string }>(env, 'PRAGMA table_info(dcc_fishbones)');
+      if (!fbCols.some((c) => c.name === 'report_json')) {
+        await runQuery(env, 'ALTER TABLE dcc_fishbones ADD COLUMN report_json TEXT');
+      }
+    } catch {
+      // Ignore if already exists
+    }
+    schemaEnsured = true;
+  } catch (err) {
+    schemaEnsured = false;
+    throw err;
   }
 }
 
