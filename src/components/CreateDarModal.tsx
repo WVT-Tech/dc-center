@@ -340,7 +340,7 @@ export const CreateDarModal: React.FC<CreateDarModalProps> = ({
               </select>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
                   {t(lang, 'colType')}
@@ -372,18 +372,6 @@ export const CreateDarModal: React.FC<CreateDarModalProps> = ({
                     </option>
                   ))}
                 </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  ISO Clause
-                </label>
-                <input
-                  type="text"
-                  value={isoClause}
-                  onChange={(e) => setIsoClause(e.target.value)}
-                  placeholder="7.5"
-                  className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-                />
               </div>
             </div>
           )}
