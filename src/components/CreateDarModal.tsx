@@ -58,10 +58,6 @@ export const CreateDarModal: React.FC<CreateDarModalProps> = ({
   const [titleTh, setTitleTh] = useState<string>('');
   const [titleEn, setTitleEn] = useState<string>('');
   const [isoClause, setIsoClause] = useState<string>('7.5');
-  const [reason, setReason] = useState<string>('');
-  const [objective, setObjective] = useState<string>('');
-  const [scope, setScope] = useState<string>('');
-  const [stepsText, setStepsText] = useState<string>('');
   const [attachmentName, setAttachmentName] = useState<string | undefined>();
   const [attachmentType, setAttachmentType] = useState<string | undefined>();
   const [attachmentDataUrl, setAttachmentDataUrl] = useState<string | undefined>();
@@ -83,14 +79,6 @@ export const CreateDarModal: React.FC<CreateDarModalProps> = ({
       setTitleTh(doc.titleTh);
       setTitleEn(doc.titleEn);
       setIsoClause(doc.isoClause);
-      setObjective(lang === 'th' ? doc.content.objectiveTh : doc.content.objectiveEn);
-      setScope(lang === 'th' ? doc.content.scopeTh : doc.content.scopeEn);
-      setStepsText(
-        (lang === 'th'
-          ? doc.content.procedureStepsTh
-          : doc.content.procedureStepsEn
-        ).join('\n')
-      );
     } else {
       const defaultType =
         docCodeConfig.docTypes.find((dt) => dt.code === 'WI')?.code ??
@@ -106,16 +94,12 @@ export const CreateDarModal: React.FC<CreateDarModalProps> = ({
       setTitleTh('');
       setTitleEn('');
       setIsoClause('7.5');
-      setObjective('');
-      setScope('');
-      setStepsText('');
     }
-    setReason('');
     setAttachmentName(undefined);
     setAttachmentType(undefined);
     setAttachmentDataUrl(undefined);
     setAttachmentTextPreview(undefined);
-  }, [isOpen, initialMode, activeDocs, currentUser.department, departments, docCodeConfig.docTypes, lang]);
+  }, [isOpen, initialMode, activeDocs, currentUser.department, departments, docCodeConfig.docTypes]);
 
   // Sync fields when user selects a different target doc for Revision/Obsolete
   const handleSelectTargetDoc = (id: string) => {
@@ -127,14 +111,6 @@ export const CreateDarModal: React.FC<CreateDarModalProps> = ({
       setTitleTh(found.titleTh);
       setTitleEn(found.titleEn);
       setIsoClause(found.isoClause);
-      setObjective(lang === 'th' ? found.content.objectiveTh : found.content.objectiveEn);
-      setScope(lang === 'th' ? found.content.scopeTh : found.content.scopeEn);
-      setStepsText(
-        (lang === 'th'
-          ? found.content.procedureStepsTh
-          : found.content.procedureStepsEn
-        ).join('\n')
-      );
     }
   };
 
@@ -204,41 +180,62 @@ export const CreateDarModal: React.FC<CreateDarModalProps> = ({
     e.preventDefault();
     const cleanTitleTh = titleTh.trim() || titleEn.trim();
     const cleanTitleEn = titleEn.trim() || titleTh.trim();
-    if (!cleanTitleTh || !reason.trim()) return;
+    if (!cleanTitleTh) return;
 
-    const steps = stepsText
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const existingTarget =
+      darType !== 'New Issue' ? documents.find((d) => d.id === targetDocId) : undefined;
 
     const proposedContent: DocumentContent | undefined =
       darType === 'Obsolete'
         ? undefined
         : {
             objectiveTh:
-              objective.trim() ||
+              existingTarget?.content.objectiveTh ||
               'กำหนดขั้นตอนมาตรฐานการปฏิบัติงานให้สอดคล้องกับระบบคุณภาพ ISO 9001:2015',
             objectiveEn:
-              objective.trim() ||
+              existingTarget?.content.objectiveEn ||
               'Define standardized operating procedures aligned with ISO 9001:2015.',
-            scopeTh: scope.trim() || `ครอบคลุมการปฏิบัติงานในหน่วยงาน ${department}`,
-            scopeEn: scope.trim() || `Applies to operations within ${department}.`,
-            responsibilitiesTh: `หัวหน้าหน่วยงาน ${department} และผู้ปฏิบัติงานที่เกี่ยวข้อง`,
-            responsibilitiesEn: `${department} Department Head and assigned personnel.`,
+            scopeTh:
+              existingTarget?.content.scopeTh ||
+              `ครอบคลุมการปฏิบัติงานในหน่วยงาน ${department}`,
+            scopeEn:
+              existingTarget?.content.scopeEn ||
+              `Applies to operations within ${department}.`,
+            responsibilitiesTh:
+              existingTarget?.content.responsibilitiesTh ||
+              `หัวหน้าหน่วยงาน ${department} และผู้ปฏิบัติงานที่เกี่ยวข้อง`,
+            responsibilitiesEn:
+              existingTarget?.content.responsibilitiesEn ||
+              `${department} Department Head and assigned personnel.`,
             procedureStepsTh:
-              steps.length > 0
-                ? steps
+              existingTarget?.content.procedureStepsTh.length
+                ? existingTarget.content.procedureStepsTh
                 : ['4.1 ดำเนินการตามขั้นตอนมาตรฐานที่ได้รับอนุมัติและบันทึกหลักฐานการปฏิบัติงาน'],
             procedureStepsEn:
-              steps.length > 0
-                ? steps
+              existingTarget?.content.procedureStepsEn.length
+                ? existingTarget.content.procedureStepsEn
                 : ['4.1 Execute approved standard workflow and retain operational records.'],
-            references: [`ISO 9001:2015 Clause ${isoClause}`],
+            references: existingTarget?.content.references ?? [
+              `ISO 9001:2015 Clause ${isoClause}`,
+            ],
             attachmentName,
             attachmentType,
             attachmentDataUrl,
             attachmentTextPreview,
           };
+
+    const defaultReasonTh =
+      darType === 'New Issue'
+        ? `ขอออกเอกสารใหม่: ${cleanTitleTh}`
+        : darType === 'Revision'
+          ? `ขอแก้ไขปรับปรุงเอกสาร: ${cleanTitleTh}`
+          : `ขอยกเลิกเอกสาร: ${cleanTitleTh}`;
+    const defaultReasonEn =
+      darType === 'New Issue'
+        ? `New issue request: ${cleanTitleEn}`
+        : darType === 'Revision'
+          ? `Revision request: ${cleanTitleEn}`
+          : `Obsolete request: ${cleanTitleEn}`;
 
     onSubmitDar({
       darType,
@@ -250,8 +247,8 @@ export const CreateDarModal: React.FC<CreateDarModalProps> = ({
       department,
       currentRevision: currentRev,
       proposedRevision: proposedRev,
-      reasonTh: reason.trim(),
-      reasonEn: reason.trim(),
+      reasonTh: defaultReasonTh,
+      reasonEn: defaultReasonEn,
       requesterName: lang === 'th' ? currentUser.nameTh : currentUser.nameEn,
       requesterDept: currentUser.department,
       isoClause: isoClause.trim() || '7.5',
@@ -420,69 +417,9 @@ export const CreateDarModal: React.FC<CreateDarModalProps> = ({
             </div>
           </div>
 
-          {/* Reason for Request */}
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-              {lang === 'th'
-                ? 'เหตุผลและความจำเป็นในการเปลี่ยนแปลง *'
-                : 'Reason / Summary of Change *'}
-            </label>
-            <textarea
-              required
-              rows={2}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder={
-                lang === 'th'
-                  ? 'ระบุรายละเอียดการเปลี่ยนแปลงหรือเหตุผลการออก/ยกเลิกเอกสาร...'
-                  : 'Describe what changed and why this DAR is required...'
-              }
-              className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
-            />
-          </div>
-
-          {/* Controlled Content Draft + File Attachment */}
+          {/* File Attachment */}
           {darType !== 'Obsolete' && (
-            <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    {t(lang, 'objectiveLabel')}
-                  </label>
-                  <input
-                    type="text"
-                    value={objective}
-                    onChange={(e) => setObjective(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    {t(lang, 'scopeLabel')}
-                  </label>
-                  <input
-                    type="text"
-                    value={scope}
-                    onChange={(e) => setScope(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  {lang === 'th'
-                    ? 'ขั้นตอนการปฏิบัติงาน (บรรทัดละ 1 ข้อ)'
-                    : 'Procedure Steps (one per line)'}
-                </label>
-                <textarea
-                  rows={3}
-                  value={stepsText}
-                  onChange={(e) => setStepsText(e.target.value)}
-                  placeholder="4.1 ตรวจสอบความพร้อมก่อนเริ่มงาน..."
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-                />
-              </div>
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
 
               <div>
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
