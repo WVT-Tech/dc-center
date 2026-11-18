@@ -66,7 +66,7 @@ const DEFAULT_ADMIN_USER: UserProfile = {
   department: 'QA',
   titleTh: 'ผู้ดูแลระบบและควบคุมเอกสารกลาง (Admin / DCC)',
   titleEn: 'System Admin & Lead Document Controller',
-  email: 'dcc.admin@enterprise-dcc.co.th',
+  email: '',
   avatarUrl: '/src/assets/images/avatar_doc_controller_1794897226157.jpg',
 };
 

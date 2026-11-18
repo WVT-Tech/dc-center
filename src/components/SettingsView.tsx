@@ -418,7 +418,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       department: assignedDept,
       titleTh: `${chosenRole.name} (${assignedDept})`,
       titleEn: `${chosenRole.name} (${assignedDept})`,
-      email: newEmail.trim() || `${cleanUsername}@enterprise-dcc.co.th`,
+      email: newEmail.trim(),
       isAdmin: chosenRole.id === 'role-dcc-admin',
     });
     setNewUsername('');
@@ -469,7 +469,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       password: editPassword.trim(),
       nameTh: editNameTh.trim(),
       nameEn: editNameTh.trim(),
-      email: editEmail.trim() || editingUser.email,
+      email: editEmail.trim(),
       role: finalRoleName,
       roleId: chosenRole?.id ?? editingUser.roleId,
       department: finalDept,
@@ -1213,8 +1213,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       </span>
                     </div>
                     <div className="text-xs text-slate-500 dark:text-slate-400">
-                      {user.role} · {user.department} ·{' '}
-                      <span className="font-mono">{user.email}</span>
+                      {user.role} · {user.department}
+                      {user.email ? (
+                        <>
+                          {' · '}
+                          <span className="font-mono">{user.email}</span>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 </div>
